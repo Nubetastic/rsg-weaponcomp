@@ -10,6 +10,7 @@ local wepObj         = nil
 local camera         = nil
 local selectedCache  = {}
 local selectedLabels  = {}
+local savedComponents = {}
 
 local rotateL = nil
 local rotateR = nil
@@ -17,7 +18,8 @@ local randomPos = nil
 local zoomIn = nil
 local zoomOut = nil
 local reset = nil
-local promptGroup = GetRandomIntInRange(0, 0xffffff)local promptThreadActive = false
+local promptGroup = GetRandomIntInRange(0, 0xffffff)
+local promptThreadActive = false
 local c_zoom = 1.5
 local c_offset = 0.20
 
@@ -35,7 +37,7 @@ local function UnfreezePlayer()
     SetPedCanRagdoll(cache.ped, true)
 end
 
-MenuData = {}
+local MenuData = {}
 ----------------------------------------
 -- Basics
 ----------------------------------------
@@ -159,12 +161,7 @@ local function StartCamClean(zoom, offset)
     local zoomOffset = tonumber(zoom)
     local coords = GetEntityCoords(cache.ped)
     local playerHeading = GetEntityHeading(cache.ped)
-    local angle
-    if playerHeading == nil then
-        angle = playerHeading * math.pi / 180.0
-    else
-        angle = playerHeading * math.pi / 180.0
-    end
+    local angle = playerHeading * math.pi / 180.0
 
     local pos = {
         x = coords.x - tonumber(zoomOffset * math.sin(angle)),
@@ -249,30 +246,6 @@ AddEventHandler("rsg-weaponcomp:client:animationSaved", function(objecthash, ser
     TriggerServerEvent("rsg-weaponcomp:server:check_comps")
     TriggerEvent('rsg-weaponcomp:client:ExitCam')
 end)
-
---[[
-local currentAngle = 0.0 -- grados
-local function RotateCameraAroundWeapon(clockwise)
-    if not camera or not wepObj or not DoesEntityExist(wepObj) then return end
-
-    local step = 10.0 -- grados por llamada
-    if not clockwise then step = -step end
-
-    currentAngle = (currentAngle + step) % 360 -- mantener entre 0-360
-
-    local wepCoords = GetEntityCoords(wepObj)
-    local radius = 1.0
-    local radians = math.rad(currentAngle)
-
--- Calculate new position around the object
-    local camX = wepCoords.x + radius * math.cos(radians)
-    local camY = wepCoords.y + radius * math.sin(radians)
-    local camZ = wepCoords.z -- h
-
-    SetCamCoord(camera, camX, camY, camZ)
-    PointCamAtCoord(wepObj, wepCoords.x, wepCoords.y, wepCoords.z)
-end
-]]
 
 local function SetRandomCameraAroundWeapon()
     if not camera or not wepObj then return end
@@ -361,8 +334,6 @@ end
 
 -- Prompt log (without activation prompt)
 local function RegisterCameraPrompts()
-    -- rotateL   = RegisterPrompt(Config.prompts.rotL, 'weapon_cam_rotate', promptGroup, false) -- x
-    -- rotateR   = RegisterPrompt(Config.prompts.rotR, 'weapon_cam_rotate', promptGroup, false) -- b
     randomPos = RegisterPrompt(Config.prompts.ranPos, 'weapon_cam_rand',   promptGroup, false) -- c
     zoomIn    = RegisterPrompt(Config.prompts.zoIn, 'zoom',           promptGroup, false) -- ScrollUp
     zoomOut   = RegisterPrompt(Config.prompts.zoOut, 'zoom',          promptGroup, false) -- ScrollDown
@@ -375,21 +346,16 @@ local function StartPromptThread()
     CreateThread(function()
 
         RegisterCameraPrompts()
-        local sleep = 1000
         while promptThreadActive do
             if camera then
                 local promptText = CreateVarString(10, 'LITERAL_STRING', 'Camera Controls')
                 PromptSetActiveGroupThisFrame(promptGroup, promptText)
-
-                sleep = 0
                 if IsControlJustPressed(2, Config.prompts.zoIn) then AdjustZoom(true) end
                 if IsControlJustPressed(2, Config.prompts.zoOut) then AdjustZoom(false) end
                 if IsControlJustPressed(2, Config.prompts.re) then ResetCameraToDefault()end
                 if IsControlJustPressed(2, Config.prompts.ranPos) then SetRandomCameraAroundWeapon() end
-                -- elseif IsControlJustPressed(2, Config.prompts.rotL) then RotateCameraAroundWeapon(true)
-                -- elseif IsControlJustPressed(2, Config.prompts.rotR) then RotateCameraAroundWeapon(false)
             end
-            Wait(sleep)
+            Wait(0)
         end
     end)
 end
@@ -400,8 +366,7 @@ end
 local function applyWeaponComponent(obj, prevComp, nextComp, wHash)
     local mdl = GetWeaponComponentTypeModel(nextComp)
     if mdl and mdl ~= 0 then
-        RequestModel(mdl)
-        while not HasModelLoaded(mdl) do Wait(50) end
+        lib.requestModel(mdl)
     end
     if prevComp then RemoveWeaponComponentFromWeaponObject(obj, prevComp) end
     GiveWeaponComponentToEntity(obj, nextComp, wHash, true)
@@ -420,6 +385,7 @@ local function applyDefaults(obj, wHash)
             local compHash    = GetHashKey(defaultComp)       -- su hash
             applyWeaponComponent(obj, nil, compHash, wHash)   -- lo aplicas
             selectedCache[cat] = defaultComp                  -- y lo guardas en la caché
+            selectedLabels[cat] = defaultComp
         end
     end
 end
@@ -645,7 +611,16 @@ local function OpenTintsMenu(wname, wHash, serial, propid)
     end)
 end
 
--- In MainWeaponMenu you call like this:
+local function CalculateNewPrice(current, saved)
+    local total = 0
+    for cat, name in pairs(current or {}) do
+        if saved[cat] ~= name then
+            total = total + (Config.price[cat] or 0)
+        end
+    end
+    return total
+end
+
 function MainWeaponMenu(wname, wHash, serial, propid)
     MenuData.CloseAll()
     TriggerEvent('HideAllUI')
@@ -655,14 +630,16 @@ function MainWeaponMenu(wname, wHash, serial, propid)
         applyWeaponComponent(wepObj, nil, compHash, wHash)
     end
 
+    local buyPrice = CalculateNewPrice(selectedCache, savedComponents)
+    local priceStr = string.format("%.2f", buyPrice)
+
     local el = {
         { label=locale('cl_lang_6'),  value='specific' },
         { label=locale('cl_lang_7'),  value='material' },
         { label=locale('cl_lang_8'),  value='engraving' },
         { label=locale('cl_lang_9'),  value='tints' },
-        { label=locale('cl_lang_10'), value='buy' },
-        { label=locale('cl_lang_11'), value='reset' },
-        { label=locale('cl_lang_12'), value='packup' },
+        { label=locale('cl_lang_10') .. priceStr, value='buy' },
+        { label=locale('cl_promp_1'), value='cancel' },
     }
     MenuData.Open('default', GetCurrentResourceName(), 'main_weapon_menu', {
         title    = locale('cl_lang_13'),
@@ -683,43 +660,44 @@ function MainWeaponMenu(wname, wHash, serial, propid)
 
         elseif data.current.value == 'buy' then
             if next(selectedCache) then
-                TriggerEvent('rsg-weaponcomp:client:ExitCam')
+                local alert = lib.alertDialog({
+                    header = locale('cl_lang_10') .. priceStr,
+                    content = locale('sv_lang_12') .. priceStr,
+                    centered = true,
+                    cancel = true,
+                    labels = {
+                        confirm = locale('cl_lang_26'),
+                        cancel = locale('cl_lang_27'),
+                    },
+                })
+                if alert ~= 'confirm' then return end
                 TriggerServerEvent('rsg-weaponcomp:server:setComponents',
                     wHash, serial, selectedCache, selectedLabels
                 )
-                selectedCache  = {}
-                selectedLabels = {}
                 menu.close()
             else
                 lib.notify({ title=locale('cl_notify_10'), type="error" })
             end
-        elseif data.current.value == 'reset' then
-            RSGCore.Functions.TriggerCallback('rsg-weaponcomp:server:getItemBySerial', function(comp)
-                local totalComps = comp.components or {}
-                if next(totalComps) then
-                    TriggerEvent('rsg-weaponcomp:client:ExitCam')
-                    TriggerServerEvent('rsg-weaponcomp:server:removeComponents',
-                        wHash, serial
-                    )
-                    selectedCache  = {}
-                    selectedLabels = {}
-                    menu.close()
-                else
-                    lib.notify({ title=locale('cl_notify_12'), type="error" })
-                end
-            end, serial)
-
         elseif data.current.value == 'packup' then
             TriggerEvent('rsg-weaponcomp:client:confirmpackup', propid)
             TriggerEvent('rsg-weaponcomp:client:ExitCam')
             selectedCache  = {}
             selectedLabels = {}
+            savedComponents = {}
+            menu.close()
+
+        elseif data.current.value == 'cancel' then
+            TriggerEvent('rsg-weaponcomp:client:ExitCam')
+            selectedCache  = {}
+            selectedLabels = {}
+            savedComponents = {}
             menu.close()
         end
     end, function(_, menu)
         TriggerEvent('rsg-weaponcomp:client:ExitCam')
         selectedCache  = {}
         selectedLabels = {}
+        savedComponents = {}
         menu.close()
     end)
 end
@@ -732,18 +710,44 @@ RegisterNetEvent('rsg-weaponcomp:client:startcustom', function(propid, wHash, se
     isBusy = true
 
     local propData = SpawnedProps[propid]
-    if not propData then return end
+    if not propData then isBusy = false; return end
     local propObj = propData.obj
     local coords = GetEntityCoords(propObj)
     spawnWeaponOnProp(propObj, coords, wHash)
     FreezePlayer()
     Wait(500)
-    StartCamOnWeapon(wepObj, Config.distFov)
-    StartPromptThread()
 
-    MainWeaponMenu(weaponName, wHash, serial, propid)
-    applyDefaults(wepObj, wHash)
-    isBusy = false
+    RSGCore.Functions.TriggerCallback('rsg-weaponcomp:server:getPlayerWeaponComponents', function(result)
+        local comps = result and result.components or {}
+        local labels = result and result.labels or {}
+        savedComponents = {}
+        if next(comps) then
+            for cat, compName in pairs(comps) do
+                selectedCache[cat] = compName
+                selectedLabels[cat] = labels[cat] or compName
+                savedComponents[cat] = compName
+                local compHash = GetHashKey(compName)
+                if compHash ~= 0 then
+                    applyWeaponComponent(wepObj, nil, compHash, wHash)
+                end
+            end
+            if Config.Debug then
+                print(('[%s] Loaded saved components for serial %s'):format(GetCurrentResourceName(), serial))
+                print(('[%s]   components: %s'):format(GetCurrentResourceName(), json.encode(selectedCache)))
+                print(('[%s]   labels: %s'):format(GetCurrentResourceName(), json.encode(selectedLabels)))
+            end
+        else
+            if Config.Debug then
+                print(('[%s] No saved components for serial %s, applying defaults'):format(GetCurrentResourceName(), serial))
+            end
+            applyDefaults(wepObj, wHash)
+        end
+
+        StartCamOnWeapon(wepObj, Config.distFov)
+        StartPromptThread()
+        MainWeaponMenu(weaponName, wHash, serial, propid)
+        isBusy = false
+    end, serial)
 end)
 
 --------------------------
@@ -751,24 +755,21 @@ end)
 ----------------------------
 Citizen.CreateThread(function()
     while true do
-        Wait(150)
+        Wait(500)
         local ped = cache.ped or PlayerPedId()
         local pos = GetEntityCoords(ped)
         local inRange = false
-        if not Config.PlayerProps then return end
+        if not Config.PlayerProps then Wait(5000); goto continue end
         for k, v in ipairs(Config.PlayerProps) do
             if #(pos - vector3(v.x,v.y,v.z)) < 50.0 then
                 inRange = true
                 if not SpawnedProps[v.propid] and not PackingUpProps[v.propid] then
-                    -- Modelo y objeto
                     local m = joaat(v.propmodel)
-                    RequestModel(m)
-                    while not HasModelLoaded(m) do Wait(1) end
+                    lib.requestModel(m)
                     local obj = CreateObject(m, v.x, v.y, v.z, false, true, true)
                     SetEntityHeading(obj, v.h)
                     FreezeEntityPosition(obj, true)
 
-                    -- Zona de interacción
                     local propConfig = Config.PlayerProps[k]
 
                     if Config.gunZoneActive then
@@ -779,9 +780,8 @@ Citizen.CreateThread(function()
                             onEnter = function()
                                 ingunZone = true
                                 if propConfig.item == Config.Gunsmithitem then
-                                    gunsitename = tostring(propConfig.gunsitename)
                                     if Config.showTextZone then
-                                        lib.showTextUI(gunsitename)
+                                        lib.showTextUI(tostring(propConfig.gunsitename))
                                     end
                                 end
                             end,
@@ -793,7 +793,6 @@ Citizen.CreateThread(function()
                             end
                         })
                     end
-                    -- Target para menú
                     exports.ox_target:addLocalEntity(obj, {
                         {
                             name     = 'gunsite_prop',
@@ -801,12 +800,24 @@ Citizen.CreateThread(function()
                             label    = locale('cl_lang_14'),
                             onSelect = function()
                                 local wHash = GetPedCurrentHeldWeapon(PlayerPedId())
+                                if wHash == `WEAPON_UNARMED` then
+                                    return lib.notify({ title = locale('cl_notify_13'), description=locale('cl_notify_14'), type='error' })
+                                end
                                 local serial = exports['rsg-weapons']:weaponInHands()[wHash]
                                 local weaponName = Citizen.InvokeNative(0x89CF5FF3D363311E, wHash, Citizen.ResultAsString())
-                                if not serial then -- or wHash == -1569615261 or not isWeaponOneHanded
+                                if not serial then
                                     return lib.notify({ title = locale('cl_notify_13'), description=locale('cl_notify_14'), type='error' })
                                 end
                                 TriggerEvent('rsg-weaponcomp:client:startcustom', v.propid, wHash, serial, weaponName)
+                            end,
+                            distance = 2.0
+                        },
+                        {
+                            name     = 'packup_prop',
+                            icon     = 'fas fa-box',
+                            label    = locale('cl_lang_12'),
+                            onSelect = function()
+                                TriggerEvent('rsg-weaponcomp:client:confirmpackup', v.propid)
                             end,
                             distance = 2.0
                         },
@@ -818,6 +829,7 @@ Citizen.CreateThread(function()
         end
 
         if not inRange then Wait(5000) end
+        ::continue::
     end
 end)
 
@@ -869,21 +881,17 @@ end)
 
 -- confirm gunsite packup
 RegisterNetEvent('rsg-weaponcomp:client:confirmpackup', function(propid)
-    local input = lib.inputDialog(locale('cl_lang_23'), {
-        {
-            label = locale('cl_lang_24'),
-            description = locale('cl_lang_25'),
-            type = 'select',
-            options = {
-                { value = 'yes', label = locale('cl_lang_26') },
-                { value = 'no',  label = locale('cl_lang_27') }
-            },
-            required = true
+    local alert = lib.alertDialog({
+        header = locale('cl_lang_23'),
+        content = locale('cl_lang_25'),
+        centered = true,
+        cancel = true,
+        labels = {
+            confirm = locale('cl_lang_26'),
+            cancel = locale('cl_lang_27'),
         },
     })
-    if not input or input[1] == 'no' then return end
-
-    
+    if alert ~= 'confirm' then return end
 
     LocalPlayer.state:set('inv_busy', true, true)
     lib.progressBar({
@@ -932,6 +940,14 @@ RegisterNetEvent('rsg-weaponcomp:client:packupgunsite', function(propid)
 end)
 
 ---------------------------------------------
+-- Request prop data on resource start (handles late-join after server restart)
+---------------------------------------------
+AddEventHandler('onClientResourceStart', function(resourceName)
+    if resourceName ~= GetCurrentResourceName() then return end
+    TriggerServerEvent('rsg-weaponcomp:server:requestPropData')
+end)
+
+---------------------------------------------
 -- clean up
 ---------------------------------------------
 AddEventHandler('onResourceStop', function(resource)
@@ -970,4 +986,5 @@ AddEventHandler('onResourceStop', function(resource)
 
     selectedCache  = {}
     selectedLabels = {}
+    savedComponents = {}
 end)

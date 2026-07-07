@@ -1,6 +1,7 @@
 Config = {}
 
-Config.Debug = true
+Config.Debug = false
+Config.LoadNotification = false
 Config.PlayerProps      = {}
 
 -- Ajustes de colocación
@@ -13,11 +14,8 @@ Config.Gunsmithitem     = 'gunsmith'
 Config.Gunsmithprop     = `p_gunsmithprops09x`
 Config.MaxGunsites      = 1
 Config.MaxWeapon        = 1
-Config.PaymentType      = 'cash' -- Payment = money you can select 'cash' or 'bloodmoney' / Payment = item you can select 'cash' or 'bloodmoney'
+Config.PaymentType      = 'cash' -- 'cash' or 'bloodmoney'
 Config.animationSave    = 10000 -- Waiting time for application or removal components
--- Job
--- Config.Jobs				       = {'valweaponsmith'}
-
 -- zones sfere
 Config.gunZoneActive    = false -- true / false can zone
 Config.gunZoneSize      = 3.0 -- radio zone sfere
@@ -29,9 +27,8 @@ Config.distSide = 0.13 -- Camera movements Side
 Config.distUp   = 0.05 -- Camera movements Up
 Config.distFov = 60.0 -- Camera movements FOV
 
-Config.StartCamObj      = true -- false / true Camera movements with category changes during selection (WIP)
 Config.showStats        = true -- true / false can show stats inspect
-Config.Commandinspect       = "w_inspect"
+Config.Commandinspect       = "inspect"
 Config.Commandloadweapon    = "loadweapon"
 Config.Commandequipscope    = "scope"
 Config.Commanddesequipscope = "unscope"

@@ -45,19 +45,18 @@ AddEventHandler("rsg-weaponcomp:client:InspectionWeapon", function()
     SetPedBlackboardBool(cache.ped, "GENERIC_WEAPON_CLEAN_PROMPT_AVAILABLE", true, -1) -- Citizen.InvokeNative(0xCB9401F918CB0F75, 
 
     local interaction, act = nil, nil
-    if IsWeaponOneHanded(wHash) and weaponType == 'SHORTARM' then
+    if weaponType == 'SHORTARM' or weaponType == 'MELEE_BLADE' or IsWeaponOneHanded(wHash) then
         interaction, act = "SHORTARM_HOLD_ENTER", GetHashKey("SHORTARM_CLEAN_ENTER")
-    elseif IsWeaponOneHanded(wHash) and weaponType == 'LONGARM' then
+    elseif weaponType == 'LONGARM' or weaponType == 'SHOTGUN' then
         interaction, act = "LONGARM_HOLD_ENTER", GetHashKey("LONGARM_CLEAN_ENTER")
-    elseif IsWeaponOneHanded(wHash) and weaponType == 'SHOTGUN' then
-        interaction, act = "LONGARM_HOLD_ENTER", GetHashKey("LONGARM_CLEAN_ENTER")
-    elseif IsWeaponOneHanded(wHash) and weaponType == 'GROUP_BOW' then
-    elseif IsWeaponOneHanded(wHash) and weaponType == 'MELEE_BLADE' then
     end
     if weaponType == 'GROUP_BOW' then return lib.notify({ title = locale('cl_notify_13'), description=locale('cl_notify_14'), type='error' }) end
-    if wHash ~= -1569615261 and hasGunOil then
+    if wHash ~= -1569615261 then
         if interaction then
             StartTaskItemInteraction(cache.ped, wHash, GetHashKey(interaction), 0,0,0)
+        end
+        if not hasGunOil then
+            SetPedBlackboardBool(cache.ped, "GENERIC_WEAPON_CLEAN_PROMPT_AVAILABLE", false, -1)
         end
         if Config.showStats == true then showstats() end
         while not Citizen.InvokeNative(0xEC7E480FF8BD0BED, cache.ped) do Wait(300) end
@@ -70,23 +69,23 @@ AddEventHandler("rsg-weaponcomp:client:InspectionWeapon", function()
                 Citizen.InvokeNative(0x4EB122210A90E2D8, -813354801) -- UiStateMachineDestroy(
             end
 
-            if IsDisabledControlJustReleased(0, 3820983707) and not cleaning then
+            if IsDisabledControlJustReleased(0, 3820983707) and not cleaning and hasGunOil then
                 cleaning = true
                 local Cloth= CreateObject(GetHashKey('s_balledragcloth01x'), GetEntityCoords(cache.ped), false, true, false, false, true)
                 local PropId = GetHashKey("CLOTH")
                 Citizen.InvokeNative(0x72F52AA2D2B172CC, cache.ped, 1242464081, Cloth, PropId, act, 1, 0, -1.0) -- TaskItemInteraction2
                 Wait(9500)
-                TriggerServerEvent('rsg-weaponcomp:server:inspectkitConsume')
                 TriggerServerEvent('rsg-weapons:server:repairweapon', serial)
                 ClearPedTasks(cache.ped, 1, 1)
 
-                if Config.showStats then
-                    Citizen.InvokeNative(0x4EB122210A90E2D8, -813354801)
-                    Citizen.InvokeNative(0xA7A57E89E965D839, object, 0.0, 0) -- SetWeaponDegradation(
-                    Citizen.InvokeNative(0x812CE61DEBCAB948, object, 0.0, 0) -- SetWeaponDirt(
+                if not Config.showStats then
+                    break
                 end
 
-                break
+                Citizen.InvokeNative(0xA7A57E89E965D839, object, 0.0, 0) -- SetWeaponDegradation(
+                Citizen.InvokeNative(0x812CE61DEBCAB948, object, 0.0, 0) -- SetWeaponDirt(
+                Citizen.InvokeNative(0x4EB122210A90E2D8, -813354801)
+                showstats()
             end
 
         end
@@ -94,6 +93,19 @@ AddEventHandler("rsg-weaponcomp:client:InspectionWeapon", function()
         if Config.showStats then Citizen.InvokeNative(0x4EB122210A90E2D8, -813354801) end
     end
 end)
+
+RegisterCommand('inspect', function()
+    local _, weaponHash = GetCurrentPedWeapon(cache.ped, true, 0, true)
+    if weaponHash and weaponHash ~= `WEAPON_UNARMED` then
+        TriggerEvent('rsg-weaponcomp:client:InspectionWeapon')
+    else
+        lib.notify({
+            title = locale('cl_notify_13'),
+            description = locale('cl_notify_14'),
+            type = 'error'
+        })
+    end
+end, false)
 
 AddEventHandler('onResourceStop', function(r)
     if GetCurrentResourceName() ~= r then return end

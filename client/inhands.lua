@@ -31,7 +31,6 @@ local function attachComponent(ped, compHash, weaponHash)
     -- print(mdl, compHash, weaponHash )
     if mdl and mdl ~= 0 then
         lib.requestModel(mdl)
-        while not HasModelLoaded(mdl) do Wait(100) end
     end
 
     if IsEntityAPed(ped) then

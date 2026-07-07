@@ -1,6 +1,27 @@
 local RSGCore = exports['rsg-core']:GetCoreObject()
 lib.locale()
 
+-- Build valid component name lookup for server-side validation
+local function buildValidComponentNames()
+    local names = {}
+    for _, group in pairs(Config.Shared) do
+        for _, list in pairs(group) do
+            for _, name in ipairs(list) do
+                names[name] = true
+            end
+        end
+    end
+    for _, weaponData in pairs(Config.Specific) do
+        for _, list in pairs(weaponData) do
+            for _, name in ipairs(list) do
+                names[name] = true
+            end
+        end
+    end
+    return names
+end
+local ValidComponents = buildValidComponentNames()
+
 -- When player uses the gunsmith item, open the prop placer
 RSGCore.Functions.CreateUseableItem(Config.Gunsmithitem, function(source)
   TriggerClientEvent('rsg-weaponcomp:client:createprop', source, {
@@ -111,18 +132,22 @@ RSGCore.Functions.CreateCallback('rsg-weaponcomp:server:getPlayerWeaponComponent
         and item.info.serie == serial
         then
             local comps = item.info.componentshash or {}
+            local labels = item.info.components or {}
 
             if not item.info.equippedScope then
                 local filtered = {}
+                local filteredLabels = {}
                 for cat, name in pairs(comps) do
                     if cat ~= "SCOPE" then
                         filtered[cat] = name
+                        filteredLabels[cat] = labels[cat]
                     end
                 end
                 comps = filtered
+                labels = filteredLabels
             end
 
-            return cb({ components = comps })
+            return cb({ components = comps, labels = labels })
         end
     end
 
@@ -162,11 +187,27 @@ local function CreatePropId()
     return PropId
 end
 
+local PropsDirty = false
+
+local function MarkPropsDirty()
+    PropsDirty = true
+end
+
 RegisterServerEvent('rsg-weaponcomp:server:createnewprop')
 AddEventHandler('rsg-weaponcomp:server:createnewprop', function(propmodel, item, coords, heading)
     local src = source
     local Player = RSGCore.Functions.GetPlayer(src)
     if not Player then return end
+
+    -- Server-side distance validation
+    local ped = GetPlayerPed(src)
+    local playerCoords = GetEntityCoords(ped)
+    local distance = #(vector3(playerCoords.x, playerCoords.y, playerCoords.z) - vector3(coords.x, coords.y, coords.z))
+    if distance > Config.PlaceDistance + 2.0 then
+        TriggerClientEvent('ox_lib:notify', src, { type = 'error', description = locale('cl_lang_16') })
+        return
+    end
+
     local gunsiteid = CreategunsiteId()
     local propid = CreatePropId()
     local citizenid = Player.PlayerData.citizenid
@@ -199,8 +240,9 @@ AddEventHandler('rsg-weaponcomp:server:createnewprop', function(propmodel, item,
 
     table.insert(Config.PlayerProps, PropData)
     Player.Functions.RemoveItem(Config.Gunsmithitem, 1)
-    TriggerClientEvent('rsg-inventory:client:ItemBox', src, RSGCore.Shared.Items[Config.Gunsmithitem], 'remove', 1)
+    lib.notify(src, { title = 'Gunsmith', description = '1 x ' .. RSGCore.Shared.Items[Config.Gunsmithitem].label, type = 'success' })
     TriggerEvent('rsg-weaponcomp:server:updateProps', src)
+    MarkPropsDirty()
 
 end)
 
@@ -213,19 +255,26 @@ AddEventHandler('rsg-weaponcomp:server:updateProps', function()
     TriggerClientEvent('rsg-weaponcomp:client:updatePropData', src, Config.PlayerProps)
 end)
 
+-- Client requests prop data on resource start (handles server-restart / late-join)
+RegisterNetEvent('rsg-weaponcomp:server:requestPropData')
+AddEventHandler('rsg-weaponcomp:server:requestPropData', function()
+    local src = source
+    TriggerClientEvent('rsg-weaponcomp:client:updatePropData', src, Config.PlayerProps)
+end)
+
 -- update prop
 CreateThread(function()
     while true do
         Wait(5000)
-        if PropsLoaded then
+        if PropsLoaded and PropsDirty then
             TriggerClientEvent('rsg-weaponcomp:client:updatePropData', -1, Config.PlayerProps)
+            PropsDirty = false
         end
     end
 end)
 
--- get props
 CreateThread(function()
-    TriggerEvent('rsg-weaponcomp:server:getProps', source)
+    TriggerEvent('rsg-weaponcomp:server:getProps')
     PropsLoaded = true
 end)
 
@@ -234,10 +283,16 @@ AddEventHandler('rsg-weaponcomp:server:getProps', function()
     local result = MySQL.query.await('SELECT * FROM player_weapons_custom')
     if not result[1] then return end
     for i = 1, #result do
-        local propData = json.decode(result[i].propdata)
+        local success, propData = pcall(json.decode, result[i].propdata)
+        if not success or not propData then
+            print(('[%s] Failed to decode propdata for row %d'):format(GetCurrentResourceName(), i))
+            goto continue
+        end
         if Config.LoadNotification then print(locale('sv_lang_1')..propData.item..locale('sv_lang_2')..propData.propid) end
         table.insert(Config.PlayerProps, propData)
+        ::continue::
     end
+    PropsDirty = true
 end)
 
 ---------------------------------------------
@@ -251,7 +306,7 @@ AddEventHandler('rsg-weaponcomp:server:additem', function()
     if not Player then return end
     local item, amount = Config.Gunsmithitem, 1
     Player.Functions.AddItem(item, amount)
-    TriggerClientEvent('rNotify:ShowAdvancedRightNotification', src, amount .." x "..RSGCore.Shared.Items[item].label, "generic_textures" , "tick" , "COLOR_PURE_WHITE", 4000)
+    lib.notify(src, { title = 'Gunsmith', description = amount .. ' x ' .. RSGCore.Shared.Items[item].label, type = 'success' })
 end)
 
 -- remove
@@ -261,7 +316,7 @@ AddEventHandler('rsg-weaponcomp:server:removeitem', function(item, amount)
     local Player = RSGCore.Functions.GetPlayer(src)
     if not Player then return end
     Player.Functions.RemoveItem(item, amount)
-    TriggerClientEvent('rsg-inventory:client:ItemBox', src, RSGCore.Shared.Items[item], 'remove', amount)
+    lib.notify(src, { title = 'Gunsmith', description = amount .. ' x ' .. RSGCore.Shared.Items[item].label, type = 'error' })
 end)
 
 -- remove gunsite props
@@ -290,6 +345,7 @@ AddEventHandler('rsg-weaponcomp:server:removegunsiteprops', function(propid)
 
     TriggerClientEvent('rsg-weaponcomp:client:updatePropData', -1, Config.PlayerProps)
     TriggerClientEvent('rsg-weaponcomp:client:ExitCam', src)
+    MarkPropsDirty()
 end)
 
 -------------------------------------------
@@ -329,9 +385,32 @@ RegisterServerEvent('rsg-weaponcomp:server:setComponents', function(objecthash, 
     local src = source
     local Player = RSGCore.Functions.GetPlayer(src)
     if not Player then return end
+
+    -- Validate components server-side
+    if type(selectedCache) ~= 'table' then return end
+    for cat, compName in pairs(selectedCache) do
+        if type(cat) ~= 'string' or type(compName) ~= 'string' then return end
+        if not ValidComponents[compName] then
+            TriggerClientEvent('ox_lib:notify', src, { title = locale('sv_lang_10', 0), description = 'Invalid component detected', type = 'error' })
+            return
+        end
+    end
+    
+    -- Only charge for components that are new (not already saved on the weapon)
+    local existingComps = {}
+    local weaponItem = GetWeaponItemEntry(Player, serial)
+    if weaponItem and weaponItem.info and weaponItem.info.componentshash then
+        existingComps = weaponItem.info.componentshash
+    end
+    local newComps = {}
+    for cat, name in pairs(selectedCache) do
+        if existingComps[cat] ~= name then
+            newComps[cat] = name
+        end
+    end
+    local price = CalculatePrice(newComps)
     
     local currentCash = Player.Functions.GetMoney(Config.PaymentType)
-    local price = CalculatePrice(selectedCache)
     
     if currentCash < price then
         TriggerClientEvent('ox_lib:notify', src, {
@@ -343,7 +422,9 @@ RegisterServerEvent('rsg-weaponcomp:server:setComponents', function(objecthash, 
         return
     end
     
-    Player.Functions.RemoveMoney(Config.PaymentType, price)
+    if price > 0 then
+        Player.Functions.RemoveMoney(Config.PaymentType, price)
+    end
     saveWeaponComponents(serial, selectedCache, selectedLabels, Player)
     TriggerClientEvent('rsg-weaponcomp:client:animationSaved', src, objecthash, serial)
     
@@ -366,7 +447,8 @@ RegisterNetEvent('rsg-weaponcomp:server:removeComponents', function(objecthash, 
     end
 
     local currentCash = Player.Functions.GetMoney(Config.PaymentType)
-    local price = CalculatePrice(item.info?.componentshash) * Config.RemovePrice
+    local comps = item.info and item.info.componentshash or {}
+    local price = CalculatePrice(comps) * Config.RemovePrice
     
     if currentCash < price then
         TriggerClientEvent('ox_lib:notify', src, {
@@ -390,9 +472,6 @@ RegisterNetEvent('rsg-weaponcomp:server:removeComponents', function(objecthash, 
     })
 end)
 
---------------------------------------------
--- CHECK COMPONENTS SQL
---------------------------------------------
 RegisterNetEvent('rsg-weaponcomp:server:check_comps') -- EQUIPED
 AddEventHandler('rsg-weaponcomp:server:check_comps', function()
     local src = source
