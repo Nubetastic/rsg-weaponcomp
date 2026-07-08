@@ -325,6 +325,10 @@ AddEventHandler('rsg-weaponcomp:server:removegunsiteprops', function(propid)
     local src = source
     local Player = RSGCore.Functions.GetPlayer(src)
     if not Player then return end
+    if Player.PlayerData.job.name ~= Config.JobPickup or Player.PlayerData.job.onduty ~= true then
+        TriggerClientEvent('ox_lib:notify', src, { type = 'error', description = locale('cl_lang_13') })
+        return
+    end
     local citizenid = Player.PlayerData.citizenid
     local result = MySQL.query.await('SELECT * FROM player_weapons_custom WHERE propid = ?', { propid })
     if not result or not result[1] then return end

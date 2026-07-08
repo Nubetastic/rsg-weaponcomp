@@ -6,6 +6,7 @@ Config.PlayerProps      = {}
 
 -- Ajustes de colocación
 Config.PlaceDistance     = 5.0 -- Max dist to place -> prop acces menu 
+Config.JobPickup       = "admin"
 
 -- Propiedades y límites
 Config.RepairItem        = 'weapon_repair_kit'

@@ -87,6 +87,15 @@ local function CanPlacePropHere(pos)
     return true
 end
 
+local function CanPickupProp()
+    local playerData = RSGCore.Functions.GetPlayerData()
+    local job = playerData and playerData.job
+
+    return job
+        and job.name == Config.JobPickup
+        and job.onduty == true
+end
+
 -- Spawn weapon on the prop
 local function spawnWeaponOnProp(propObj, spawnPos, wHash)
     if wepObj ~= nil and DoesEntityExist(wepObj) then
@@ -816,6 +825,9 @@ Citizen.CreateThread(function()
                             name     = 'packup_prop',
                             icon     = 'fas fa-box',
                             label    = locale('cl_lang_12'),
+                            canInteract = function()
+                                return CanPickupProp()
+                            end,
                             onSelect = function()
                                 TriggerEvent('rsg-weaponcomp:client:confirmpackup', v.propid)
                             end,
