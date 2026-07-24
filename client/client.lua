@@ -134,7 +134,7 @@ local function StartCamOnWeapon(obj, fov)
     camera = CreateCamWithParams(
         "DEFAULT_SCRIPTED_CAMERA",
         camPos.x, camPos.y, camPos.z,
-        0, 0, 0,    -- rotación; la fijamos con PointCamAtCoord
+        0, 0, 0,    -- rotaciÃ³n; la fijamos con PointCamAtCoord
         fov or 75.0,
         false, 0
     )
@@ -295,7 +295,7 @@ local function smoothZoom(cam, fromFov, toFov, duration)
     SetCamFov(cam, toFov)
 end
 
--- Zoom in/out con transición suave
+-- Zoom in/out con transiciÃ³n suave
 local function AdjustZoom(increase)
     if not camera or not wepObj then return end
     local currentFov = GetCamFov(camera)
@@ -308,7 +308,7 @@ local function AdjustZoom(increase)
     end)
 end
 
--- Reset a posición inicial del client:startcustom
+-- Reset a posiciÃ³n inicial del client:startcustom
 local function ResetCameraToDefault()
     if not camera or not wepObj then return end
     StartCamOnWeapon(wepObj, Config.distFov)
@@ -393,7 +393,7 @@ local function applyDefaults(obj, wHash)
             local defaultComp = options[1]                     -- nombre del componente
             local compHash    = GetHashKey(defaultComp)       -- su hash
             applyWeaponComponent(obj, nil, compHash, wHash)   -- lo aplicas
-            selectedCache[cat] = defaultComp                  -- y lo guardas en la caché
+            selectedCache[cat] = defaultComp                  -- y lo guardas en la cachÃ©
             selectedLabels[cat] = defaultComp
         end
     end
@@ -566,9 +566,11 @@ local function OpenTintsMenu(wname, wHash, serial, propid)
     local comps    = GetAvailableComponents(wname, wHash)
     local elements = {}
 
-    -- Recolectamos solo categorías _TINT
+    -- Recolectamos solo categorÃ­as _TINT
     for cat, items in pairs(comps) do
-        if cat:find('_TINT$') then
+        -- Grip tints cause issues; keep wrap and other tint categories available.
+        -- if cat == 'GRIP_TINT' or cat == 'GRIPSTOCK_TINT' then
+        if cat:find('_TINT$') and cat ~= 'GRIP_TINT' and cat ~= 'GRIPSTOCK_TINT' then
             local hashes, labels, labelsSends = {}, {}, {}
             for i, comp in ipairs(items) do
                 hashes[i], labels[i], labelsSends[i] = GetHashKey(comp), comp, locale(comp)
@@ -598,7 +600,7 @@ local function OpenTintsMenu(wname, wHash, serial, propid)
         return
     end
 
-    -- Aquí cambio el ID a 'weapon_tint_menu'
+    -- AquÃ­ cambio el ID a 'weapon_tint_menu'
     MenuData.Open('default', GetCurrentResourceName(), 'weapon_tint_menu', {
         title    = locale('cl_lang_5') .. ':',
         align    = 'top-left',

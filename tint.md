@@ -267,3 +267,106 @@ The Springfield grip hashes appear correct. The bad piece is probably not the Sp
 2. Test whether the held weapon keeps a non-default Springfield `GRIP` when no `GRIPSTOCK_TINT` is saved.
 3. Test whether the held weapon resets only after `GRIPSTOCK_TINT` is saved.
 4. Check whether RedM has valid longarm/rifle-specific grip tint hashes, or whether Springfield grip color should be handled only by the four Springfield `GRIP` components.
+
+## Correct Springfield Tint Settings
+
+For `WEAPON_RIFLE_SPRINGFIELD`, the correct conclusion from the available component data is: do not use a separate grip tint category.
+
+The Springfield grip/stock appearance is controlled by the Springfield-specific `GRIP` components:
+
+```lua
+["GRIP"] = {
+  "COMPONENT_RIFLE_SPRINGFIELD_GRIP",
+  "COMPONENT_RIFLE_SPRINGFIELD_GRIP_IRONWOOD",
+  "COMPONENT_RIFLE_SPRINGFIELD_GRIP_ENGRAVED",
+  "COMPONENT_RIFLE_SPRINGFIELD_GRIP_BURLED",
+}
+```
+
+The correct Springfield tint setting is effectively no grip tint:
+
+```lua
+-- Do not offer these for WEAPON_RIFLE_SPRINGFIELD:
+-- ["GRIPSTOCK_TINT"] = { ... }
+-- ["GRIP_TINT"] = { ... }
+```
+
+The current inherited `LONGARM -> GRIPSTOCK_TINT` list should not be treated as correct for Springfield because it contains `COMPONENT_SHORTARM_GRIPSTOCK_TINT_*` entries. Those are not shown in the Springfield weapon attach-point data, and they match the observed failure where the in-hand weapon falls back to the default Springfield grip.
+
+Important implementation note for later: with the current `GetAvailableComponents()` merge behavior, adding an empty Springfield-specific `GRIPSTOCK_TINT = {}` will not block the shared longarm tint list. The Springfield would need to be excluded from inherited `GRIPSTOCK_TINT`, or the available-component builder would need an override/deny-list mechanism.
+
+Sources checked:
+
+- Nexus Mods page with `WEAPON_RIFLE_SPRINGFIELD` attach-point data: `https://www.nexusmods.com/reddeadredemption2/mods/2806?tab=docs`
+- Nexus Mods page with the same Springfield attach-point data: `https://www.nexusmods.com/reddeadredemption2/mods/2816?tab=docs`
+- Scribd armory config excerpt listing Springfield `GRIP`, `SIGHT`, and `WRAP`, with no Springfield tint category: `https://www.scribd.com/document/855719042/Trad-Armurerie-2-RDR`
+
+## Longarm Gripstock Tint Test
+
+Question: would `COMPONENT_LONGARM_GRIPSTOCK_TINT_*` work with `WEAPON_RIFLE_SPRINGFIELD`?
+
+Current answer: worth testing, but not guaranteed.
+
+These are much more plausible than the current inherited `COMPONENT_SHORTARM_GRIPSTOCK_TINT_*` hashes because Springfield is a `GROUP_RIFLE` / `LONGARM` weapon. I found an external armory-style config excerpt that lists `COMPONENT_LONGARM_GRIPSTOCK_TINT_*` under longarm shared customization, so the names are plausible component names.
+
+However, the Springfield weapon attach-point data itself only lists these grip components under `WAPGRIP`:
+
+```lua
+"COMPONENT_RIFLE_SPRINGFIELD_GRIP"
+"COMPONENT_RIFLE_SPRINGFIELD_GRIP_IRONWOOD"
+"COMPONENT_RIFLE_SPRINGFIELD_GRIP_ENGRAVED"
+"COMPONENT_RIFLE_SPRINGFIELD_GRIP_BURLED"
+```
+
+It does not show Springfield-specific gripstock tint attach-point entries. So the longarm tint hashes may work as overlay/shop-item tints, or the in-hand weapon may still reject them and fall back to a Springfield grip variant.
+
+### Fastest config-only test
+
+Do not add a Springfield-specific `GRIPSTOCK_TINT` list on top of the current config yet. `GetAvailableComponents()` merges shared and specific categories, so adding a Springfield-specific `GRIPSTOCK_TINT` would append to the inherited bad shortarm list instead of replacing it.
+
+For the quickest test, temporarily replace the current `Config.Shared["LONGARM"]["GRIPSTOCK_TINT"]` list with the longarm hashes:
+
+```lua
+['GRIPSTOCK_TINT'] = {
+  "COMPONENT_LONGARM_GRIPSTOCK_TINT_A_1",
+  "COMPONENT_LONGARM_GRIPSTOCK_TINT_A_2",
+  "COMPONENT_LONGARM_GRIPSTOCK_TINT_A_3",
+  "COMPONENT_LONGARM_GRIPSTOCK_TINT_A_4",
+  "COMPONENT_LONGARM_GRIPSTOCK_TINT_A_5",
+  "COMPONENT_LONGARM_GRIPSTOCK_TINT_A_6",
+  "COMPONENT_LONGARM_GRIPSTOCK_TINT_A_7",
+  "COMPONENT_LONGARM_GRIPSTOCK_TINT_A_8",
+  "COMPONENT_LONGARM_GRIPSTOCK_TINT_B_1",
+  "COMPONENT_LONGARM_GRIPSTOCK_TINT_B_2",
+  "COMPONENT_LONGARM_GRIPSTOCK_TINT_B_3",
+  "COMPONENT_LONGARM_GRIPSTOCK_TINT_B_4",
+  "COMPONENT_LONGARM_GRIPSTOCK_TINT_B_5",
+  "COMPONENT_LONGARM_GRIPSTOCK_TINT_B_6",
+  "COMPONENT_LONGARM_GRIPSTOCK_TINT_B_7",
+  "COMPONENT_LONGARM_GRIPSTOCK_TINT_B_8",
+  "COMPONENT_LONGARM_GRIPSTOCK_TINT_GUTTAPERCHA",
+  "COMPONENT_LONGARM_GRIPSTOCK_TINT_PEARL",
+  "COMPONENT_LONGARM_GRIPSTOCK_TINT_GRAY_BIRCH",
+  "COMPONENT_LONGARM_GRIPSTOCK_TINT_BURLED",
+},
+```
+
+### Test steps
+
+1. Restart the resource/server after the temporary config change.
+2. Use a Springfield with no saved `componentshash`, or clear the saved components for that weapon first.
+3. Select a non-default Springfield `GRIP`, such as `COMPONENT_RIFLE_SPRINGFIELD_GRIP_IRONWOOD`.
+4. Select one `GRIPSTOCK_TINT`, preferably a very visible one like `COMPONENT_LONGARM_GRIPSTOCK_TINT_PEARL` or `COMPONENT_LONGARM_GRIPSTOCK_TINT_BURLED`.
+5. Buy/save.
+6. Run the load/reload path so the held weapon rebuilds in hands.
+7. Check whether the held Springfield keeps the selected grip/tint or snaps back to `COMPONENT_RIFLE_SPRINGFIELD_GRIP`.
+
+### How to read the result
+
+If the in-hand weapon keeps the selected tint, then the current issue is probably the wrong `SHORTARM` tint hashes in the longarm shared list.
+
+If the in-hand weapon still resets to the default grip, then Springfield likely does not support separate gripstock tint overlays, and its color/material choice should stay limited to the four Springfield `GRIP` components.
+
+Source checked for plausible longarm tint names:
+
+- Scribd armory config excerpt listing `COMPONENT_LONGARM_GRIPSTOCK_TINT_*`: `https://www.scribd.com/document/855719042/Trad-Armurerie-2-RDR`
