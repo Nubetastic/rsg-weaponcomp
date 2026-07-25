@@ -1,30 +1,8 @@
 local RSGCore = exports['rsg-core']:GetCoreObject()
 lib.locale()
 
--- Orden y prioridades
-local PrimaryOrder = { "BARREL","GRIP","SIGHT","CLIP","MAG","STOCK","TUBE","TORCH_MATCHSTICK","GRIPSTOCK" }
-local primaryIndex = {}
-for i,cat in ipairs(PrimaryOrder) do primaryIndex[cat]=i end
-local function suffixPriority(cat)
-    if cat:find("_TINT$")             then return 5 end
-    if cat:find("_ENGRAVING_MATERIAL$") then return 4 end
-    if cat:find("_ENGRAVING$")        then return 3 end
-    if cat:find("_MATERIAL$")         then return 2 end
-    return 1
-end
-local function cmpCategories(a,b)
-    local ia,ib = primaryIndex[a], primaryIndex[b]
-    if ia and ib then return ia<ib end
-    if ia then return true end
-    if ib then return false end
-    return suffixPriority(a) < suffixPriority(b)
-end
-local function getSortedKeys(t)
-    local ks = {}
-    for k in pairs(t) do ks[#ks+1]=k end
-    table.sort(ks, cmpCategories)
-    return ks
-end
+-- Orden y prioridades (shared helper defined in config.lua: GetSortedComponentKeys)
+local getSortedKeys = GetSortedComponentKeys
 
 local function attachComponent(ped, compHash, weaponHash)
     local mdl = GetWeaponComponentTypeModel(compHash)

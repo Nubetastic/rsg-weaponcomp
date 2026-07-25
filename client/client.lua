@@ -625,8 +625,8 @@ function MainWeaponMenu(wname, wHash, serial, propid)
     MenuData.CloseAll()
     TriggerEvent('HideAllUI')
 
-    for cat, compName in pairs(selectedCache) do
-        local compHash = GetHashKey(compName)
+    for _, cat in ipairs(GetSortedComponentKeys(selectedCache)) do
+        local compHash = GetHashKey(selectedCache[cat])
         applyWeaponComponent(wepObj, nil, compHash, wHash)
     end
 
@@ -722,7 +722,8 @@ RegisterNetEvent('rsg-weaponcomp:client:startcustom', function(propid, wHash, se
         local labels = result and result.labels or {}
         savedComponents = {}
         if next(comps) then
-            for cat, compName in pairs(comps) do
+            for _, cat in ipairs(GetSortedComponentKeys(comps)) do
+                local compName = comps[cat]
                 selectedCache[cat] = compName
                 selectedLabels[cat] = labels[cat] or compName
                 savedComponents[cat] = compName
