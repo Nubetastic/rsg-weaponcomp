@@ -32,6 +32,7 @@
     "cl_lang_14": "Personalização de Arma",
     "cl_notify_13": "Item Necessário",
     "cl_notify_14": "Você não está segurando uma arma!",
+    "cl_clean_item_need": "É necessário óleo de arma para limpar na inspeção!",
     "cl_lang_15": "Longe Demais!",
     "cl_lang_16" : "você colocou longe demais, mova para mais perto",
     "cl_lang_17" : "Limite de Bancadas de Armas Atingido!",

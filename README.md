@@ -14,7 +14,7 @@ Weapon customization system for RedM (RSG Core). Customize weapon components —
 - **Diff-based pricing** — Only components that differ from the weapon's current saved state are charged.
 - **Dual payment type** — Supports `cash` or `bloodmoney` payment.
 - **ox_target integration** — Right-click the placed prop for "Weapon Customization" and "PackUp" options.
-- **Weapon inspection** — `/inspect` command shows weapon stats and a clean prompt. Cleaning uses `weapon_repair_kit`.
+- **Native weapon inspection** — RDR2-style stats UI, clean animation with real-time stat recovery. Open via `/inspect` or weapon wheel **Maintain** (scroll click). Cleaning uses `gun_oil`; full repair remains `weapon_repair_kit` via `rsg-weapons`.
 - **Weapon restriction list** — Certain weapons (knives, throwables, binoculars, lasso, etc.) can be excluded from customization.
 - **Persistence** — All prop and component data saved to MySQL database (`player_weapons_custom` table).
 
@@ -57,6 +57,13 @@ Weapon customization system for RedM (RSG Core). Customize weapon components —
    ('gunsmith', 'Gunsmith Kit', 1, 0, 1);
    ```
 
+5. Add a **`gun_oil`** item for inspection cleaning (example — adjust for your items setup):
+   ```lua
+   gun_oil = { name = 'gun_oil', label = 'Gun Oil', weight = 120, type = 'item', image = 'weapon_repair_kit.png', unique = false, useable = false, shouldClose = true, description = 'Cleans weapons during inspection' },
+   ```
+
+   Optional: integrate `rsg-weapons` callbacks `consumeGunOil` / `syncCleanedWeapon` to persist cleaned quality. Without them, cleaning still works visually; item removal falls back to `rsg-weapons:server:removeitem`.
+
 ## Configuration
 
 All settings in `config.lua`:
@@ -66,7 +73,9 @@ All settings in `config.lua`:
 | `Config.Debug` | bool | `false` | Enable debug logging |
 | `Config.LoadNotification` | bool | `false` | Show load notifications |
 | `Config.PlaceDistance` | float | `5.0` | Max distance to place a gunsmith prop |
-| `Config.RepairItem` | string | `weapon_repair_kit` | Item consumed for weapon cleaning |
+| `Config.RepairItem` | string | `weapon_repair_kit` | Full repair item (via `rsg-weapons`) |
+| `Config.CleanItem` | string | `gun_oil` | Item consumed when cleaning during inspection |
+| `Config.WeaponWheelInspect` | bool | `true` | Hook weapon wheel Maintain action (scroll click) |
 | `Config.Gunsmithitem` | string | `gunsmith` | Item used to deploy a gunsmith prop |
 | `Config.Gunsmithprop` | hash | `p_gunsmithprops09x` | Prop model for the gunsmith workbench |
 | `Config.MaxGunsites` | int | `1` | Max props per player |
@@ -109,7 +118,13 @@ Add/edit locale files in the `locales/` directory. Available locales: `cs`, `en`
 
 | Command | Description |
 |---|---|
-| `/inspect` | Open weapon inspection with stats and clean prompt |
+| `/inspect` | Native weapon inspection (stats + optional clean with gun oil) |
 | `/loadweapon` | Load custom weapon skin |
 | `/scope` | Equip scope attachment |
 | `/unscope` | Remove scope attachment |
+
+## Export
+
+```lua
+exports['rsg-weaponcomp']:startWeaponInspection(hasCleanItem, cleanCallbacks, weaponHashOverride)
+```

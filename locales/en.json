@@ -32,6 +32,7 @@
     "cl_lang_14": "Weapon Customization", 
     "cl_notify_13": "Item Needed", 
     "cl_notify_14": "You're not holding a weapon!", 
+    "cl_clean_item_need": "Gun oil is required to clean during inspection!",
     "cl_lang_15": "Too Far Away!", 
     "cl_lang_16" : "you placed it too far away move it closer", 
     "cl_lang_17" : "Max Gunsites Reached!", 

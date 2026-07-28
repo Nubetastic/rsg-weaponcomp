@@ -8,7 +8,8 @@ Config.PlayerProps      = {}
 Config.PlaceDistance     = 5.0 -- Max dist to place -> prop acces menu 
 
 -- Propiedades y límites
-Config.RepairItem        = 'weapon_repair_kit'
+Config.CleanItem         = 'gun_oil'           -- consumed when cleaning during native inspection
+Config.RepairItem        = 'weapon_repair_kit' -- full repair (via rsg-weapons usable item)
 Config.Gunsmithrobbery  = 'lockpick'
 Config.Gunsmithitem     = 'gunsmith'
 Config.Gunsmithprop     = `p_gunsmithprops09x`
@@ -28,6 +29,7 @@ Config.distUp   = 0.05 -- Camera movements Up
 Config.distFov = 60.0 -- Camera movements FOV
 
 Config.showStats        = true -- true / false can show stats inspect
+Config.WeaponWheelInspect = true -- weapon wheel Maintain action (scroll click)
 Config.Commandinspect       = "inspect"
 Config.Commandloadweapon    = "loadweapon"
 Config.Commandequipscope    = "scope"
