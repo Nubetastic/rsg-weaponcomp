@@ -3,7 +3,7 @@ rdr3_warning 'I acknowledge that this is a prerelease build of RedM, and I am aw
 game 'rdr3'
 
 description 'rsg-weaponcomp'
-version '2.8.1'
+version '2.8.2'
 
 shared_script {
     '@ox_lib/init.lua',
