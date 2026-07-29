@@ -9,7 +9,8 @@ Config.PlaceDistance     = 5.0 -- Max dist to place -> prop acces menu
 Config.JobPickup       = "admin"
 
 -- Propiedades y límites
-Config.RepairItem        = 'weapon_repair_kit'
+Config.CleanItem         = 'gun_oil'           -- consumed when cleaning during native inspection
+Config.RepairItem        = 'weapon_repair_kit' -- full repair (via rsg-weapons usable item)
 Config.Gunsmithrobbery  = 'lockpick'
 Config.Gunsmithitem     = 'gunsmith'
 Config.Gunsmithprop     = `p_gunsmithprops09x`
@@ -29,6 +30,7 @@ Config.distUp   = 0.05 -- Camera movements Up
 Config.distFov = 60.0 -- Camera movements FOV
 
 Config.showStats        = true -- true / false can show stats inspect
+Config.WeaponWheelInspect = true -- weapon wheel Maintain action (scroll click)
 Config.Commandinspect       = "inspect"
 Config.Commandloadweapon    = "loadweapon"
 Config.Commandequipscope    = "scope"
@@ -1589,6 +1591,40 @@ Config.Specific = {
     --     },
     -- },
 }
+
+-------------------------
+-- COMPONENT APPLY ORDER
+-- Ensures base parts (GRIP, GRIPSTOCK, WRAP, etc.) are (re)applied BEFORE
+-- their _TINT / _MATERIAL / _ENGRAVING variants, since on many weapons the
+-- tint/material component shares the same attach slot as the base part.
+-- Applying the base part after its tint would silently overwrite it.
+-------------------------
+local PrimaryOrder = { "BARREL","GRIP","SIGHT","CLIP","MAG","STOCK","TUBE","TORCH_MATCHSTICK","GRIPSTOCK" }
+local primaryIndex = {}
+for i, cat in ipairs(PrimaryOrder) do primaryIndex[cat] = i end
+
+local function suffixPriority(cat)
+    if cat:find("_TINT$")               then return 5 end
+    if cat:find("_ENGRAVING_MATERIAL$") then return 4 end
+    if cat:find("_ENGRAVING$")          then return 3 end
+    if cat:find("_MATERIAL$")           then return 2 end
+    return 1
+end
+
+local function cmpCategories(a, b)
+    local ia, ib = primaryIndex[a], primaryIndex[b]
+    if ia and ib then return ia < ib end
+    if ia then return true end
+    if ib then return false end
+    return suffixPriority(a) < suffixPriority(b)
+end
+
+function GetSortedComponentKeys(t)
+    local ks = {}
+    for k in pairs(t) do ks[#ks + 1] = k end
+    table.sort(ks, cmpCategories)
+    return ks
+end
 
 -------------------------
 -- EXTRA Webhooks / RANKING
