@@ -11,6 +11,9 @@ local camera         = nil
 local selectedCache  = {}
 local selectedLabels  = {}
 local savedComponents = {}
+local removedComponents = {}
+local savedStyles = {}
+local canPickupAllowed = false
 
 local rotateL = nil
 local rotateR = nil
@@ -22,6 +25,8 @@ local promptGroup = GetRandomIntInRange(0, 0xffffff)
 local promptThreadActive = false
 local c_zoom = 1.5
 local c_offset = 0.20
+local cameraOrbit = { yaw = 0.0, pitch = 15.0, radius = 0.50, baseRadius = 0.50, zoom = 50 }
+local nuiContext = nil
 
 local function FreezePlayer()
     FreezeEntityPosition(cache.ped, true)
@@ -77,6 +82,9 @@ local function GetAvailableComponents(weaponName, wHash)
     end
 
     mergeComponents(merged, specific)    -- Specific components
+    if Config.GunstockTints ~= true then
+        merged.GRIPSTOCK_TINT = nil
+    end
     return merged
 end
 
@@ -85,15 +93,6 @@ local function CanPlacePropHere(pos)
         if #(pos - vector3(p.x,p.y,p.z)) < 1.3 then return false end
     end
     return true
-end
-
-local function CanPickupProp()
-    local playerData = RSGCore.Functions.GetPlayerData()
-    local job = playerData and playerData.job
-
-    return job
-        and job.name == Config.JobPickup
-        and job.onduty == true
 end
 
 -- Spawn weapon on the prop
@@ -142,6 +141,14 @@ local function StartCamOnWeapon(obj, fov)
     SetCamActive(camera, true)
     RenderScriptCams(true, true, 1000, true, false)
     PointCamAtCoord(camera, origin.x, origin.y, origin.z + 0.1)
+
+    local currentCam = GetCamCoord(camera)
+    local delta = currentCam - origin
+    cameraOrbit.radius = #(delta) > 0.01 and #(delta) or 0.50
+    cameraOrbit.baseRadius = cameraOrbit.radius
+    cameraOrbit.zoom = 50
+    cameraOrbit.yaw = math.deg(math.atan(delta.y, delta.x))
+    cameraOrbit.pitch = math.deg(math.asin(math.clamp(delta.z / cameraOrbit.radius, -1.0, 1.0)))
 end
 
 RegisterNetEvent('rsg-weaponcomp:client:ExitCam')
@@ -160,6 +167,7 @@ AddEventHandler('rsg-weaponcomp:client:ExitCam', function()
     ClearCameraPrompts()
     promptThreadActive = false
     MenuData.CloseAll()
+    if WeaponCompNUI then WeaponCompNUI.Close() end
     TriggerEvent('HideAllUI')
     UnfreezePlayer()
 end)
@@ -343,7 +351,6 @@ end
 
 -- Prompt log (without activation prompt)
 local function RegisterCameraPrompts()
-    randomPos = RegisterPrompt(Config.prompts.ranPos, 'weapon_cam_rand',   promptGroup, false) -- c
     zoomIn    = RegisterPrompt(Config.prompts.zoIn, 'zoom',           promptGroup, false) -- ScrollUp
     zoomOut   = RegisterPrompt(Config.prompts.zoOut, 'zoom',          promptGroup, false) -- ScrollDown
     reset     = RegisterPrompt(Config.prompts.re, 'weapon_cam_reset',  promptGroup, true)  -- v
@@ -362,7 +369,6 @@ local function StartPromptThread()
                 if IsControlJustPressed(2, Config.prompts.zoIn) then AdjustZoom(true) end
                 if IsControlJustPressed(2, Config.prompts.zoOut) then AdjustZoom(false) end
                 if IsControlJustPressed(2, Config.prompts.re) then ResetCameraToDefault()end
-                if IsControlJustPressed(2, Config.prompts.ranPos) then SetRandomCameraAroundWeapon() end
             end
             Wait(0)
         end
@@ -568,9 +574,10 @@ local function OpenTintsMenu(wname, wHash, serial, propid)
 
     -- Recolectamos solo categorÃ­as _TINT
     for cat, items in pairs(comps) do
-        -- Grip tints cause issues; keep wrap and other tint categories available.
-        -- if cat == 'GRIP_TINT' or cat == 'GRIPSTOCK_TINT' then
-        if cat:find('_TINT$') and cat ~= 'GRIP_TINT' and cat ~= 'GRIPSTOCK_TINT' then
+        -- Melee grip tints remain hidden; firearm gunstock tints use the config toggle.
+        if cat:find('_TINT$') and cat ~= 'GRIP_TINT'
+            and (cat ~= 'GRIPSTOCK_TINT' or Config.GunstockTints == true)
+        then
             local hashes, labels, labelsSends = {}, {}, {}
             for i, comp in ipairs(items) do
                 hashes[i], labels[i], labelsSends[i] = GetHashKey(comp), comp, locale(comp)
@@ -715,10 +722,359 @@ end
 
 ----------------------------------------
 -- START CUSTOM EVENT
+
+local NUIComponentOrder = {
+    'BARREL', 'GRIP', 'SIGHT', 'CLIP', 'MAG', 'STOCK', 'TUBE', 'SCOPE', 'WRAP',
+    'TORCH_MATCHSTICK', 'BARREL_RIFLING', 'FRAME_VERTDATA',
+    'FRAME_MATERIAL', 'BARREL_MATERIAL', 'CYLINDER_MATERIAL', 'TRIGGER_MATERIAL',
+    'HAMMER_MATERIAL', 'SIGHT_MATERIAL', 'GRIP_MATERIAL', 'WRAP_MATERIAL',
+    'FRAME_ENGRAVING', 'BARREL_ENGRAVING', 'CYLINDER_ENGRAVING',
+    'GRIPSTOCK_ENGRAVING', 'MELEE_BLADE_ENGRAVING',
+    'FRAME_ENGRAVING_MATERIAL', 'BARREL_ENGRAVING_MATERIAL',
+    'CYLINDER_ENGRAVING_MATERIAL', 'MELEE_BLADE_ENGRAVING_MATERIAL',
+    'BARREL_TINT', 'CYLINDER_TINT', 'TRIGGER_TINT', 'GRIPSTOCK_TINT', 'WRAP_TINT',
+}
+
+local function IsRemovableComponent(component)
+    return type(component) == 'string' and (component == 'WRAP'
+        or component == 'SCOPE'
+        or component == 'GRIP_MATERIAL'
+        or component == 'BARREL_RIFLING'
+        or component == 'FRAME_VERTDATA'
+        or component:find('_ENGRAVING', 1, true) ~= nil)
+end
+
+local function NormalizeStyleOption(category, component)
+    local removable = {
+        part = true,
+        color = true,
+        material = true,
+        tint = true,
+        metal = true,
+        engraving = true,
+    }
+    for word in tostring(category or ''):lower():gmatch('[^_]+') do
+        removable[word] = true
+    end
+    for _, word in ipairs((Config.MetalList and Config.MetalList[category]) or {}) do
+        removable[tostring(word):lower()] = true
+    end
+
+    local words = {}
+    local label = tostring(locale(component) or component):lower():gsub('[^%w]+', ' ')
+    for word in label:gmatch('%S+') do
+        words[#words + 1] = word
+    end
+    while #words > 1 and removable[words[1]] do
+        table.remove(words, 1)
+    end
+    return table.concat(words, ' ')
+end
+
+local function ResolveStyleComponent(category, component, items)
+    if type(component) ~= 'string' or type(items) ~= 'table' then return nil end
+    for _, candidate in ipairs(items) do
+        if candidate == component then return candidate end
+    end
+
+    local wanted = NormalizeStyleOption(category, component)
+    if wanted == '' then return nil end
+    for _, candidate in ipairs(items) do
+        if NormalizeStyleOption(category, candidate) == wanted then
+            return candidate
+        end
+    end
+end
+
+local function BuildNUIData()
+    local groups = {
+        { key = 'specific', label = locale('cl_lang_2'), components = Config.Specific[nuiContext.wname] or {} },
+        { key = 'material', label = locale('cl_lang_3'), components = {} },
+        { key = 'engraving', label = locale('cl_lang_4'), components = {} },
+        { key = 'tints', label = locale('cl_lang_5'), components = {} },
+    }
+    local available = GetAvailableComponents(nuiContext.wname, nuiContext.wHash)
+    for cat, items in pairs(available) do
+        if cat:find('_MATERIAL$') and not cat:find('_ENGRAVING_MATERIAL$') then
+            groups[2].components[cat] = items
+        elseif cat:find('_ENGRAVING') then
+            groups[3].components[cat] = items
+        elseif cat:find('_TINT$') and cat ~= 'GRIP_TINT'
+            and (cat ~= 'GRIPSTOCK_TINT' or Config.GunstockTints == true)
+        then
+            groups[4].components[cat] = items
+        end
+    end
+    local result = {
+        categories = {},
+        styles = {},
+        metalList = Config.MetalList or {},
+        price = string.format('%.2f', CalculateNewPrice(selectedCache, savedComponents)),
+        cameraZoom = cameraOrbit.zoom,
+        canPickup = canPickupAllowed,
+    }
+    for _, group in ipairs(groups) do
+        local category = { key = group.key, label = group.label, count = 0, groups = {} }
+        local added = {}
+        local function addComponentGroup(component, items)
+            if not items or #items == 0 or added[component] then return end
+            added[component] = true
+            local removable = IsRemovableComponent(component)
+            local offset = removable and 1 or 0
+            local componentGroup = { key = component, label = locale(component), count = #items + offset, currentIndex = 1, options = {} }
+            if removable then
+                componentGroup.options[1] = { component = component, index = 1, label = 'None', remove = true, current = selectedCache[component] == nil }
+            end
+            for index, name in ipairs(items) do
+                local isCurrent = selectedCache[component] == name
+                local menuIndex = index + offset
+                if isCurrent then componentGroup.currentIndex = menuIndex end
+                componentGroup.options[#componentGroup.options + 1] = { component = component, index = menuIndex, label = locale(name), current = isCurrent }
+            end
+            category.groups[#category.groups + 1] = componentGroup
+            category.count = category.count + 1
+        end
+        for _, component in ipairs(NUIComponentOrder) do
+            addComponentGroup(component, group.components[component])
+        end
+        local remaining = {}
+        for component in pairs(group.components) do
+            if not added[component] then remaining[#remaining + 1] = component end
+        end
+        table.sort(remaining)
+        for _, component in ipairs(remaining) do
+            addComponentGroup(component, group.components[component])
+        end
+        if category.count > 0 then result.categories[#result.categories + 1] = category end
+    end
+    local available = GetAvailableComponents(nuiContext.wname, nuiContext.wHash)
+    for _, style in ipairs(savedStyles) do
+        local compatible, unsupported, invalid = 0, 0, 0
+        for category, entry in pairs(style.components or {}) do
+            local items = available[category]
+            if not items then
+                unsupported = unsupported + 1
+            elseif entry.action == 'remove' and IsRemovableComponent(category) then
+                compatible = compatible + 1
+            elseif entry.action == 'set' then
+                if ResolveStyleComponent(category, entry.component, items) then
+                    compatible = compatible + 1
+                else
+                    invalid = invalid + 1
+                end
+            else
+                invalid = invalid + 1
+            end
+        end
+        result.styles[#result.styles + 1] = {
+            id = style.id,
+            name = style.name,
+            compatible = compatible,
+            unsupported = unsupported,
+            invalid = invalid,
+        }
+    end
+    return result
+end
+
+local function RefreshSavedStyles(done)
+    RSGCore.Functions.TriggerCallback('rsg-weaponcomp:server:getStyles', function(styles)
+        savedStyles = type(styles) == 'table' and styles or {}
+        if done then done() end
+    end)
+end
+
+local function BuildCurrentStyleEntries()
+    if not nuiContext then return {} end
+    local available = GetAvailableComponents(nuiContext.wname, nuiContext.wHash)
+    local entries = {}
+    for category in pairs(available) do
+        if selectedCache[category] then
+            entries[category] = { action = 'set', component = selectedCache[category] }
+        elseif IsRemovableComponent(category) then
+            entries[category] = { action = 'remove' }
+        end
+    end
+    return entries
+end
+
+local function FindSavedStyle(styleId)
+    styleId = tonumber(styleId)
+    for _, style in ipairs(savedStyles) do
+        if tonumber(style.id) == styleId then return style end
+    end
+end
+
+local function RefreshStylesNUI(message)
+    RefreshSavedStyles(function()
+        if message then lib.notify({ title = 'Saved Styles', description = message, type = 'success' }) end
+        if nuiContext and WeaponCompNUI then WeaponCompNUI.Update(BuildNUIData()) end
+    end)
+end
+
+local function CloseNUIAndExit()
+    if WeaponCompNUI then WeaponCompNUI.Close() end
+    TriggerEvent('rsg-weaponcomp:client:ExitCam')
+    selectedCache, selectedLabels, savedComponents, removedComponents, savedStyles, nuiContext = {}, {}, {}, {}, {}, nil
+    canPickupAllowed = false
+end
+
+function MainWeaponMenu(wname, wHash, serial, propid)
+    nuiContext = { wname = wname, wHash = wHash, serial = serial, propid = propid }
+    MenuData.CloseAll()
+    TriggerEvent('HideAllUI')
+    for _, compName in pairs(selectedCache) do applyWeaponComponent(wepObj, nil, GetHashKey(compName), wHash) end
+    WeaponCompNUI.Open(BuildNUIData())
+end
+
+RegisterNetEvent('rsg-weaponcomp:client:nuiSelect', function(data)
+    if not nuiContext or not data.component or not data.index then return end
+    local groups = { specific = Config.Specific[nuiContext.wname] or {}, material = {}, engraving = {}, tints = {} }
+    local available = GetAvailableComponents(nuiContext.wname, nuiContext.wHash)
+    for cat, items in pairs(available) do
+        if cat:find('_MATERIAL$') and not cat:find('_ENGRAVING_MATERIAL$') then groups.material[cat] = items
+        elseif cat:find('_ENGRAVING') then groups.engraving[cat] = items
+        elseif cat:find('_TINT$') and cat ~= 'GRIP_TINT'
+            and (cat ~= 'GRIPSTOCK_TINT' or Config.GunstockTints == true)
+        then groups.tints[cat] = items end
+    end
+    local items = groups[data.group] and groups[data.group][data.component]
+    if not items then return end
+    local removable = IsRemovableComponent(data.component)
+    local previous = selectedCache[data.component] and GetHashKey(selectedCache[data.component]) or nil
+    if removable and data.index == 1 then
+        if previous then RemoveWeaponComponentFromWeaponObject(wepObj, previous) end
+        selectedCache[data.component] = nil
+        selectedLabels[data.component] = nil
+        removedComponents[data.component] = true
+        WeaponCompNUI.Update(BuildNUIData())
+        return
+    end
+    local itemIndex = data.index - (removable and 1 or 0)
+    if not items[itemIndex] then return end
+    local nextName = items[itemIndex]
+    applyWeaponComponent(wepObj, previous, GetHashKey(nextName), nuiContext.wHash)
+    selectedCache[data.component], selectedLabels[data.component] = nextName, locale(nextName)
+    removedComponents[data.component] = nil
+    WeaponCompNUI.Update(BuildNUIData())
+end)
+
+RegisterNetEvent('rsg-weaponcomp:client:nuiBuy', function()
+    if not nuiContext or (not next(selectedCache) and not next(removedComponents)) then
+        return lib.notify({ title = locale('cl_notify_10'), type = 'error' })
+    end
+    TriggerServerEvent('rsg-weaponcomp:server:setComponents', nuiContext.wHash, nuiContext.serial, selectedCache, selectedLabels, removedComponents)
+    CloseNUIAndExit()
+end)
+
+RegisterNetEvent('rsg-weaponcomp:client:nuiPickup', function()
+    if not nuiContext or not canPickupAllowed then return end
+
+    local propid = nuiContext.propid
+    CloseNUIAndExit()
+    TriggerEvent('rsg-weaponcomp:client:confirmpackup', propid)
+end)
+
+RegisterNetEvent('rsg-weaponcomp:client:nuiClose', CloseNUIAndExit)
+RegisterNetEvent('rsg-weaponcomp:client:nuiBack', function() end)
+
+RegisterNetEvent('rsg-weaponcomp:client:nuiStyleLoad', function(data)
+    if not nuiContext then return end
+    local style = FindSavedStyle(data.id)
+    if not style then return end
+    local available = GetAvailableComponents(nuiContext.wname, nuiContext.wHash)
+    local applied, skipped = 0, 0
+    for category, entry in pairs(style.components or {}) do
+        local items = available[category]
+        if not items then
+            skipped = skipped + 1
+        elseif entry.action == 'remove' and IsRemovableComponent(category) then
+            local previous = selectedCache[category] and GetHashKey(selectedCache[category]) or nil
+            if previous then RemoveWeaponComponentFromWeaponObject(wepObj, previous) end
+            selectedCache[category], selectedLabels[category] = nil, nil
+            removedComponents[category] = true
+            applied = applied + 1
+        elseif entry.action == 'set' then
+            local resolvedComponent = ResolveStyleComponent(category, entry.component, items)
+            if resolvedComponent then
+                local previous = selectedCache[category] and GetHashKey(selectedCache[category]) or nil
+                applyWeaponComponent(wepObj, previous, GetHashKey(resolvedComponent), nuiContext.wHash)
+                selectedCache[category], selectedLabels[category] = resolvedComponent, locale(resolvedComponent)
+                removedComponents[category] = nil
+                applied = applied + 1
+            else
+                skipped = skipped + 1
+            end
+        else
+            skipped = skipped + 1
+        end
+    end
+    WeaponCompNUI.Update(BuildNUIData())
+    lib.notify({ title = 'Saved Styles', description = ('Applied %d groups, skipped %d'):format(applied, skipped), type = applied > 0 and 'success' or 'error' })
+end)
+
+RegisterNetEvent('rsg-weaponcomp:client:nuiStyleCreate', function(data)
+    local entries = BuildCurrentStyleEntries()
+    RSGCore.Functions.TriggerCallback('rsg-weaponcomp:server:createStyle', function(success, message)
+        if not success then return lib.notify({ title = 'Saved Styles', description = message or 'Unable to save style', type = 'error' }) end
+        RefreshStylesNUI('Style saved')
+    end, data.name, entries)
+end)
+
+RegisterNetEvent('rsg-weaponcomp:client:nuiStyleUpdate', function(data)
+    local entries = BuildCurrentStyleEntries()
+    RSGCore.Functions.TriggerCallback('rsg-weaponcomp:server:updateStyle', function(success, message)
+        if not success then return lib.notify({ title = 'Saved Styles', description = message or 'Unable to update style', type = 'error' }) end
+        RefreshStylesNUI('Style updated')
+    end, data.id, entries)
+end)
+
+RegisterNetEvent('rsg-weaponcomp:client:nuiStyleAddMissing', function(data)
+    local entries = BuildCurrentStyleEntries()
+    RSGCore.Functions.TriggerCallback('rsg-weaponcomp:server:addMissingStyle', function(success, added)
+        if not success then return lib.notify({ title = 'Saved Styles', description = added or 'Unable to add style groups', type = 'error' }) end
+        RefreshStylesNUI(('%d missing groups added'):format(tonumber(added) or 0))
+    end, data.id, entries)
+end)
+
+RegisterNetEvent('rsg-weaponcomp:client:nuiStyleRemove', function(data)
+    local style = FindSavedStyle(data.id)
+    if not style then return end
+    RSGCore.Functions.TriggerCallback('rsg-weaponcomp:server:removeStyle', function(success)
+        if not success then return lib.notify({ title = 'Saved Styles', description = 'Unable to remove style', type = 'error' }) end
+        RefreshStylesNUI('Style removed')
+    end, data.id)
+end)
+
+local function UpdateOrbitCamera()
+    if not camera or not wepObj then return end
+    local target = GetEntityCoords(wepObj)
+    local yaw, pitch = math.rad(cameraOrbit.yaw), math.rad(cameraOrbit.pitch)
+    local horizontal = cameraOrbit.radius * math.cos(pitch)
+    SetCamCoord(camera, target.x + horizontal * math.cos(yaw), target.y + horizontal * math.sin(yaw), target.z + cameraOrbit.radius * math.sin(pitch))
+    PointCamAtCoord(camera, target.x, target.y, target.z)
+end
+
+RegisterNetEvent('rsg-weaponcomp:client:nuiPivot', function(data)
+    if not camera or not wepObj then return end
+    cameraOrbit.yaw = cameraOrbit.yaw - (tonumber(data.dx) or 0.0) * 0.35
+    cameraOrbit.pitch = math.clamp(cameraOrbit.pitch + (tonumber(data.dy) or 0.0) * 0.25, -55.0, 65.0)
+    UpdateOrbitCamera()
+end)
+
+RegisterNetEvent('rsg-weaponcomp:client:nuiZoom', function(data)
+    if not camera or not wepObj then return end
+    cameraOrbit.zoom = math.clamp(tonumber(data.zoom) or 50, 0, 100)
+    local normalized = cameraOrbit.zoom / 100.0
+    cameraOrbit.radius = cameraOrbit.baseRadius * (1.35 - (normalized * 0.75))
+    SetCamFov(camera, 85.0 - (normalized * 55.0))
+    UpdateOrbitCamera()
+end)
 ----------------------------------------
 RegisterNetEvent('rsg-weaponcomp:client:startcustom', function(propid, wHash, serial, weaponName)
     if isBusy then return end
     isBusy = true
+    removedComponents = {}
 
     local propData = SpawnedProps[propid]
     if not propData then isBusy = false; return end
@@ -756,8 +1112,13 @@ RegisterNetEvent('rsg-weaponcomp:client:startcustom', function(propid, wHash, se
 
         StartCamOnWeapon(wepObj, Config.distFov)
         StartPromptThread()
-        MainWeaponMenu(weaponName, wHash, serial, propid)
-        isBusy = false
+        RefreshSavedStyles(function()
+            RSGCore.Functions.TriggerCallback('rsg-weaponcomp:server:canPickupProp', function(allowed)
+                canPickupAllowed = allowed == true
+                MainWeaponMenu(weaponName, wHash, serial, propid)
+                isBusy = false
+            end)
+        end)
     end, serial)
 end)
 
@@ -820,18 +1181,6 @@ Citizen.CreateThread(function()
                                     return lib.notify({ title = locale('cl_notify_13'), description=locale('cl_notify_14'), type='error' })
                                 end
                                 TriggerEvent('rsg-weaponcomp:client:startcustom', v.propid, wHash, serial, weaponName)
-                            end,
-                            distance = 2.0
-                        },
-                        {
-                            name     = 'packup_prop',
-                            icon     = 'fas fa-box',
-                            label    = locale('cl_lang_12'),
-                            canInteract = function()
-                                return CanPickupProp()
-                            end,
-                            onSelect = function()
-                                TriggerEvent('rsg-weaponcomp:client:confirmpackup', v.propid)
                             end,
                             distance = 2.0
                         },
@@ -1001,4 +1350,6 @@ AddEventHandler('onResourceStop', function(resource)
     selectedCache  = {}
     selectedLabels = {}
     savedComponents = {}
+    removedComponents = {}
+    savedStyles = {}
 end)

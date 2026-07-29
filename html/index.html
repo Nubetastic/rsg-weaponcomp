@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Weapon Customization</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main id="panel" class="panel" aria-hidden="true">
+    <header class="header">
+      <div>
+        <h1 id="title">Weapon Customization</h1>
+        <p id="subtitle"></p>
+      </div>
+      <div class="header-actions">
+        <button id="close" class="button">Close</button>
+        <label class="scale-control">Scale <input id="scale" type="range" min=".5" max="1.5" step=".05"><output id="scale-value">100%</output></label>
+        <label class="zoom-control">Camera Zoom <input id="camera-zoom" type="range" min="0" max="100" step="1"><output id="camera-zoom-value">50%</output></label>
+      </div>
+    </header>
+
+    <section id="main-screen" class="screen">
+      <div class="camera-hint">Hold right mouse button and move to pivot around the gun.</div>
+      <div id="categories" class="categories"></div>
+      <div class="footer">
+        <div class="price-label">Total <span class="price-output">$0.00</span></div>
+        <button class="button buy buy-action">Buy</button>
+      </div>
+    </section>
+
+    <section id="options-screen" class="screen hidden">
+      <div id="options" class="options"></div>
+      <div class="footer submenu-footer">
+        <button id="back" class="button">Back</button>
+        <div class="price-label">Total <span class="price-output">$0.00</span></div>
+        <button class="button buy buy-action">Buy</button>
+      </div>
+    </section>
+
+    <section id="styles-screen" class="screen hidden">
+      <button id="style-guide" class="button style-guide-button">Style Guide</button>
+      <div id="style-list" class="style-list"></div>
+      <div id="style-summary" class="style-summary">Select a saved style.</div>
+      <div class="style-controls">
+        <button id="style-create" class="button">Save New</button>
+        <div class="style-actions">
+          <button id="style-load" class="button">Load</button>
+          <button id="style-update" class="button">Update</button>
+          <button id="style-add-missing" class="button">Add Missing</button>
+          <button id="style-remove" class="button danger">Remove</button>
+        </div>
+      </div>
+      <div class="footer submenu-footer">
+        <button id="styles-back" class="button">Back</button>
+        <div class="price-label">Total <span class="price-output">$0.00</span></div>
+        <button class="button buy buy-action">Buy</button>
+      </div>
+    </section>
+
+    <section id="modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <div class="modal-window">
+        <h2 id="modal-title"></h2>
+        <p id="modal-message"></p>
+        <input id="modal-input" class="modal-input hidden" type="text" maxlength="48" autocomplete="off">
+        <div class="modal-actions">
+          <button id="modal-cancel" class="button">Cancel</button>
+          <button id="modal-confirm" class="button">Confirm</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <section id="guide-overlay" class="guide-overlay hidden" aria-hidden="true">
+    <article class="guide-window" role="dialog" aria-modal="true" aria-labelledby="guide-title">
+      <header class="guide-header">
+        <div>
+          <h1 id="guide-title">Saved Style Guide</h1>
+          <p>Build one look, apply what fits, then expand it for more weapons.</p>
+        </div>
+        <div class="guide-header-actions">
+          <button id="guide-back-top" class="button">Back to Styles</button>
+          <button id="guide-close" class="button">Close</button>
+        </div>
+      </header>
+
+      <div id="guide-content" class="guide-content">
+        <section class="guide-lead">
+          <span class="guide-kicker">Example workflow</span>
+          <h2>Start with a Bolt Action style</h2>
+          <p>Customize the Bolt Action, save the style, and load it while working on the Mauser or Carcano. The style applies matching categories and safely skips anything the new gun cannot use.</p>
+        </section>
+
+        <section class="weapon-flow" aria-label="Bolt Action style transfer example">
+          <article class="weapon-card source">
+            <span class="weapon-step">1 · Save</span>
+            <img src="https://cfx-nui-rsg-inventory/html/images/weapon_rifle_boltaction.png" alt="Bolt Action Rifle">
+            <h3>Bolt Action</h3>
+            <p>Create the base look: metals, engraving, tint, and wrap.</p>
+          </article>
+          <div class="flow-arrow" aria-hidden="true">›</div>
+          <article class="weapon-card">
+            <span class="weapon-step">2 · Load</span>
+            <img src="https://cfx-nui-rsg-inventory/html/images/weapon_pistol_mauser.png" alt="Mauser Pistol">
+            <h3>Mauser</h3>
+            <p>Shared colors can match. Rifle-only parts and wrap are skipped.</p>
+          </article>
+          <div class="flow-arrow" aria-hidden="true">›</div>
+          <article class="weapon-card">
+            <span class="weapon-step">3 · Expand</span>
+            <img src="https://cfx-nui-rsg-inventory/html/images/weapon_sniperrifle_carcano.png" alt="Carcano Rifle">
+            <h3>Carcano</h3>
+            <p>Load the style, choose Carcano-specific parts, then add missing groups.</p>
+          </article>
+        </section>
+
+        <section class="guide-columns">
+          <article class="guide-card transferable">
+            <span class="guide-card-mark">Usually transfers</span>
+            <h2>Shared appearance</h2>
+            <ul>
+              <li>Metal materials and matching colors</li>
+              <li>Engraving patterns and engraving metals</li>
+              <li>Tints</li>
+              <li>Wrap choices when both guns support wraps</li>
+            </ul>
+          </article>
+          <article class="guide-card specific">
+            <span class="guide-card-mark">May be skipped</span>
+            <h2>Weapon-specific parts</h2>
+            <ul>
+              <li>Barrel, grip, stock, clip, and sight variants</li>
+              <li>Scopes on guns without a scope category</li>
+              <li>Role, collector, bounty, and legendary parts</li>
+              <li>Any option with no matching category and name</li>
+            </ul>
+          </article>
+        </section>
+
+        <section class="expand-guide">
+          <div class="expand-copy">
+            <span class="guide-kicker">Make one style more compatible</span>
+            <h2>Add categories from another gun</h2>
+            <p>A style can grow without losing its existing setup. This works best when the original weapon does not offer a category that another weapon has.</p>
+          </div>
+          <ol class="guide-steps">
+            <li><strong>Load</strong><span>Open the second gun and load the saved style.</span></li>
+            <li><strong>Customize</strong><span>Choose the extra parts that only this gun offers.</span></li>
+            <li><strong>Add Missing</strong><span>Add only categories not already stored in the style.</span></li>
+          </ol>
+          <div class="scope-example">
+            <strong>Scope example</strong>
+            <span>Start with a weapon that has no scope category. On a scoped weapon, load the style, select a scope, then use Add Missing. If the style already stores Scope as None, use Update to replace that choice.</span>
+          </div>
+        </section>
+
+        <section class="status-guide">
+          <div><strong>Compatible</strong><span>Will apply to this gun.</span></div>
+          <div><strong>Unsupported</strong><span>This gun does not have that category.</span></div>
+          <div><strong>Invalid</strong><span>The category exists, but no matching option was found.</span></div>
+        </section>
+      </div>
+
+      <footer class="guide-footer">
+        <p>Skipped parts do not stop the compatible parts from applying.</p>
+        <button id="guide-back-bottom" class="button">Back to Saved Styles</button>
+      </footer>
+    </article>
+  </section>
+  <script src="app.js"></script>
+</body>
+</html>

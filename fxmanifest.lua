@@ -16,12 +16,23 @@ server_scripts {
 }
 
 client_scripts {
-    'client/*.lua'
+    'client/NUIMenu.lua',
+    'client/client.lua',
+    'client/dataview.lua',
+    'client/inhands.lua',
+    'client/inspect.lua',
+    'client/propplace.lua',
+    'client/test.lua',
 }
 
 files {
-    'locales/*.json'
+    'locales/*.json',
+    'html/index.html',
+    'html/style.css',
+    'html/app.js',
 }
+
+ui_page 'html/index.html'
 
 dependencies {
     'oxmysql',

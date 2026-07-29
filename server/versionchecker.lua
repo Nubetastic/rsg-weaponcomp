@@ -1,74 +1,50 @@
------------------------------------------------------------------------
--- Improved Version Checker for Rexshack-RedM Resources
------------------------------------------------------------------------ 
+-- Drop-in version checker for Nt_ resources.
+-- Each GitHub repository must have the same name as its resource folder and use
+-- the main branch. The version is read from the `version` entry in fxmanifest.lua.
+
+local githubRoot = 'https://raw.githubusercontent.com/Nubetastic'
 
 local resourceName = GetCurrentResourceName()
-local githubRawBase = 'https://raw.githubusercontent.com/Rexshack-RedM/rsg-versioncheckers/main/'
+local currentVersion = GetResourceMetadata(resourceName, 'version', 0)
+local manifestUrl = ('%s/%s/main/fxmanifest.lua'):format(githubRoot, resourceName)
+local repositoryUrl = ('https://github.com/Nubetastic/%s'):format(resourceName)
 
-local function printLog(type, message)
-    local color = (type == 'success' and '^2') or (type == 'warning' and '^3') or '^1'
-    print(('[%s]%s %s^7'):format(resourceName, color, message))
+local function versionCheckPrint(kind, message)
+    local color = kind == 'success' and '^2' or '^1'
+    print(('^5[%s] %s%s^7'):format(resourceName, color, message))
 end
 
--- Simple semantic version comparison (supports major.minor.patch)
-local function isVersionOutdated(current, latest)
-    local function splitVersion(v)
-        local major, minor, patch = v:match("(%d+)%.(%d+)%.(%d+)")
-        if major then
-            return {tonumber(major), tonumber(minor) or 0, tonumber(patch) or 0}
-        end
-        return {0, 0, 0} -- fallback
-    end
-
-    local c = splitVersion(current)
-    local l = splitVersion(latest)
-
-    for i = 1, 3 do
-        if l[i] > c[i] then return true
-        elseif l[i] < c[i] then return false
-        end
-    end
-    return false -- equal
-end
-
-local function CheckVersion()
-    local currentVersion = GetResourceMetadata(resourceName, 'version')
-    if not currentVersion then
-        printLog('error', 'Unable to read current resource version from fxmanifest.lua!')
+local function checkVersion()
+    if not currentVersion or currentVersion == '' then
+        versionCheckPrint('error', "No 'version' entry was found in fxmanifest.lua.")
         return
     end
 
-    local versionUrl = githubRawBase .. resourceName .. '/version.txt'
-
-    PerformHttpRequest(versionUrl, function(statusCode, remoteVersion, headers)
-        if statusCode ~= 200 then
-            printLog('error', ('Version check failed (HTTP %s). Check your internet or the GitHub URL.'):format(statusCode))
+    PerformHttpRequest(manifestUrl, function(statusCode, response)
+        if statusCode ~= 200 or not response then
+            versionCheckPrint('error', ('Version check failed (HTTP %s).'):format(statusCode or 'unknown'))
             return
         end
 
-        if not remoteVersion or remoteVersion == '' then
-            printLog('error', 'Received empty version data from GitHub.')
+        -- Prefix a newline so this also works when `version` is the first line.
+        -- Anchoring to a line prevents this from matching `fx_version`.
+        local latestVersion = ('\n' .. response):match("[\r\n]%s*version%s*['\"]([^'\"]+)['\"]")
+
+        if not latestVersion then
+            versionCheckPrint('error', "The remote fxmanifest.lua has no readable 'version' entry.")
             return
         end
 
-        -- Trim whitespace/newlines
-        remoteVersion = remoteVersion:gsub('%s+$', '')
-
-        if currentVersion == remoteVersion then
-            printLog('success', 'You are running the latest version!')
-            return
-        end
-
-        if isVersionOutdated(currentVersion, remoteVersion) then
-            printLog('error', ('OUTDATED! Please update to version %s'):format(remoteVersion))
-            printLog('error', 'Download from: https://github.com/Rexshack-RedM/'..GetCurrentResourceName()..'')
+        if latestVersion == currentVersion then
+            versionCheckPrint('success', ('Version %s is up to date.'):format(currentVersion))
         else
-            printLog('warning', ('You are running a newer version (%s) than the remote (%s). Possible dev build?'):format(currentVersion, remoteVersion))
+            versionCheckPrint('error', ('Version %s is outdated. Latest: %s - %s'):format(
+                currentVersion,
+                latestVersion,
+                repositoryUrl
+            ))
         end
     end, 'GET')
 end
 
---------------------------------------------------------------------------------------------------
--- Start version check on resource start
---------------------------------------------------------------------------------------------------
-CheckVersion()
+checkVersion()

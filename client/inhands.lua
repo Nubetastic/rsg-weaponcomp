@@ -45,6 +45,24 @@ local function attachComponent(ped, compHash, weaponHash)
     end
 end
 
+local function ensureConfiguredScope(ped, weaponHash, components)
+    local scopeName = components and components.SCOPE
+    if type(scopeName) ~= 'string' or scopeName == '' then return end
+
+    local scopeHash = GetHashKey(scopeName)
+    if scopeHash == 0 then return end
+
+    local hasScope = false
+    if type(HasPedGotWeaponComponent) == 'function' then
+        local checked, result = pcall(HasPedGotWeaponComponent, ped, weaponHash, scopeHash)
+        hasScope = checked and (result == true or result == 1)
+    end
+
+    if not hasScope then
+        attachComponent(ped, scopeHash, weaponHash)
+    end
+end
+
 local function clearAllComponents(ped, weaponHash)
     local wName = Citizen.InvokeNative(0x89CF5FF3D363311E, weaponHash, Citizen.ResultAsString())
     local weaponType = GetWeaponType(weaponHash)
@@ -90,6 +108,10 @@ AddEventHandler("rsg-weaponcomp:client:reloadWeapon", function()
                 end
             end
         end
+
+        -- Scope components can be dropped while the remaining shop items are rebuilt.
+        -- Verify the configured scope after all other components and restore it if needed.
+        ensureConfiguredScope(ped, wHash, comps)
 
         Citizen.InvokeNative(0x76A18844E743BF91, ped)
     end, serial)

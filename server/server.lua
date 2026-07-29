@@ -4,23 +4,182 @@ lib.locale()
 -- Build valid component name lookup for server-side validation
 local function buildValidComponentNames()
     local names = {}
+    local categories = {}
+    local function add(category, name)
+        names[name] = true
+        categories[category] = categories[category] or {}
+        categories[category][name] = true
+    end
     for _, group in pairs(Config.Shared) do
-        for _, list in pairs(group) do
+        for category, list in pairs(group) do
             for _, name in ipairs(list) do
-                names[name] = true
+                add(category, name)
             end
         end
     end
     for _, weaponData in pairs(Config.Specific) do
-        for _, list in pairs(weaponData) do
+        for category, list in pairs(weaponData) do
             for _, name in ipairs(list) do
-                names[name] = true
+                add(category, name)
             end
         end
     end
-    return names
+    return names, categories
 end
-local ValidComponents = buildValidComponentNames()
+local ValidComponents, ValidComponentsByCategory = buildValidComponentNames()
+
+local function IsRemovableComponent(component)
+    return type(component) == 'string' and (component == 'WRAP'
+        or component == 'SCOPE'
+        or component == 'GRIP_MATERIAL'
+        or component == 'BARREL_RIFLING'
+        or component == 'FRAME_VERTDATA'
+        or component:find('_ENGRAVING', 1, true) ~= nil)
+end
+
+local StylesTableReady = false
+
+local function EnsureStylesTable()
+    if StylesTableReady then return end
+    MySQL.query.await([[
+        CREATE TABLE IF NOT EXISTS weapon_custom_styles (
+            id INT NOT NULL AUTO_INCREMENT,
+            citizenid VARCHAR(64) NOT NULL,
+            name VARCHAR(48) NOT NULL,
+            components LONGTEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            INDEX idx_weapon_styles_owner (citizenid)
+        )
+    ]])
+    StylesTableReady = true
+end
+
+CreateThread(EnsureStylesTable)
+
+local function GetStyleOwner(source)
+    local Player = RSGCore.Functions.GetPlayer(source)
+    if not Player then return nil end
+    return Player.PlayerData.citizenid
+end
+
+local function NormalizeStyleName(name)
+    if type(name) ~= 'string' then return nil end
+    name = name:match('^%s*(.-)%s*$')
+    if name == '' or #name > (Config.MaxStyleNameLength or 48) then return nil end
+    return name
+end
+
+local function ValidateStyleEntries(entries)
+    if type(entries) ~= 'table' then return nil end
+    local clean, count = {}, 0
+    for category, entry in pairs(entries) do
+        count = count + 1
+        if count > 100 or type(category) ~= 'string' or type(entry) ~= 'table' then return nil end
+        if category == 'GRIPSTOCK_TINT' and Config.GunstockTints ~= true then return nil end
+        if entry.action == 'set' then
+            if type(entry.component) ~= 'string'
+                or not ValidComponentsByCategory[category]
+                or not ValidComponentsByCategory[category][entry.component]
+            then
+                return nil
+            end
+            clean[category] = { action = 'set', component = entry.component }
+        elseif entry.action == 'remove' and ValidComponentsByCategory[category] and IsRemovableComponent(category) then
+            clean[category] = { action = 'remove' }
+        else
+            return nil
+        end
+    end
+    return clean
+end
+
+local function DecodeStyle(row)
+    local success, components = pcall(json.decode, row.components or '{}')
+    if not success or type(components) ~= 'table' then components = {} end
+    return {
+        id = row.id,
+        name = row.name,
+        components = components,
+        createdAt = row.created_at,
+        updatedAt = row.updated_at,
+    }
+end
+
+RSGCore.Functions.CreateCallback('rsg-weaponcomp:server:getStyles', function(source, cb)
+    EnsureStylesTable()
+    local citizenid = GetStyleOwner(source)
+    if not citizenid then return cb({}) end
+    local rows = MySQL.query.await(
+        'SELECT id, name, components, created_at, updated_at FROM weapon_custom_styles WHERE citizenid = ? ORDER BY updated_at DESC, id DESC',
+        { citizenid }
+    ) or {}
+    local styles = {}
+    for i = 1, #rows do styles[i] = DecodeStyle(rows[i]) end
+    cb(styles)
+end)
+
+RSGCore.Functions.CreateCallback('rsg-weaponcomp:server:createStyle', function(source, cb, name, entries)
+    EnsureStylesTable()
+    local citizenid = GetStyleOwner(source)
+    local cleanName, cleanEntries = NormalizeStyleName(name), ValidateStyleEntries(entries)
+    if not citizenid or not cleanName or not cleanEntries or not next(cleanEntries) then return cb(false, 'Invalid style') end
+    local count = MySQL.scalar.await('SELECT COUNT(*) FROM weapon_custom_styles WHERE citizenid = ?', { citizenid }) or 0
+    if count >= (Config.MaxSavedStyles or 20) then return cb(false, 'Style limit reached') end
+    MySQL.insert.await(
+        'INSERT INTO weapon_custom_styles (citizenid, name, components) VALUES (?, ?, ?)',
+        { citizenid, cleanName, json.encode(cleanEntries) }
+    )
+    cb(true)
+end)
+
+local function MergeStyle(source, styleId, entries, addMissingOnly)
+    EnsureStylesTable()
+    local citizenid = GetStyleOwner(source)
+    local cleanEntries = ValidateStyleEntries(entries)
+    styleId = tonumber(styleId)
+    if not citizenid or not styleId or not cleanEntries then return false, 'Invalid style update' end
+    local row = MySQL.single.await(
+        'SELECT id, components FROM weapon_custom_styles WHERE id = ? AND citizenid = ?',
+        { styleId, citizenid }
+    )
+    if not row then return false, 'Style not found' end
+    local success, saved = pcall(json.decode, row.components or '{}')
+    if not success or type(saved) ~= 'table' then saved = {} end
+    local changed = 0
+    for category, entry in pairs(cleanEntries) do
+        if not addMissingOnly or saved[category] == nil then
+            saved[category] = entry
+            changed = changed + 1
+        end
+    end
+    MySQL.update.await(
+        'UPDATE weapon_custom_styles SET components = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND citizenid = ?',
+        { json.encode(saved), styleId, citizenid }
+    )
+    return true, changed
+end
+
+RSGCore.Functions.CreateCallback('rsg-weaponcomp:server:updateStyle', function(source, cb, styleId, entries)
+    cb(MergeStyle(source, styleId, entries, false))
+end)
+
+RSGCore.Functions.CreateCallback('rsg-weaponcomp:server:addMissingStyle', function(source, cb, styleId, entries)
+    cb(MergeStyle(source, styleId, entries, true))
+end)
+
+RSGCore.Functions.CreateCallback('rsg-weaponcomp:server:removeStyle', function(source, cb, styleId)
+    EnsureStylesTable()
+    local citizenid = GetStyleOwner(source)
+    styleId = tonumber(styleId)
+    if not citizenid or not styleId then return cb(false) end
+    local changed = MySQL.update.await(
+        'DELETE FROM weapon_custom_styles WHERE id = ? AND citizenid = ?',
+        { styleId, citizenid }
+    )
+    cb((changed or 0) > 0)
+end)
 
 -- When player uses the gunsmith item, open the prop placer
 RSGCore.Functions.CreateUseableItem(Config.Gunsmithitem, function(source)
@@ -298,6 +457,15 @@ end)
 ---------------------------------------------
 -- items
 ---------------------------------------------
+RSGCore.Functions.CreateCallback('rsg-weaponcomp:server:canPickupProp', function(source, cb)
+    local Player = RSGCore.Functions.GetPlayer(source)
+    local job = Player and Player.PlayerData.job
+
+    cb(job ~= nil
+        and job.name == Config.JobPickup
+        and job.onduty == true
+    )
+end)
 -- add item
 RegisterServerEvent('rsg-weaponcomp:server:additem')
 AddEventHandler('rsg-weaponcomp:server:additem', function()
@@ -334,7 +502,9 @@ AddEventHandler('rsg-weaponcomp:server:removegunsiteprops', function(propid)
     if not result or not result[1] then return end
     local propData = json.decode(result[1].propdata)
 
-    if propData.citizenid ~= citizenid then print(locale('sv_lang_3')) return end
+    -- Config.JobPickup is an in-game administration job. Any on-duty member
+    -- may pack up a prop, regardless of which citizen originally placed it.
+    -- if propData.citizenid ~= citizenid then print(locale('sv_lang_3')) return end
 
     MySQL.Async.execute('DELETE FROM player_weapons_custom WHERE propid = @propid', { ['@propid'] = propid })
 
@@ -385,7 +555,7 @@ local function CalculatePrice(selection)
     return total
 end
 
-RegisterServerEvent('rsg-weaponcomp:server:setComponents', function(objecthash, serial, selectedCache, selectedLabels)
+RegisterServerEvent('rsg-weaponcomp:server:setComponents', function(objecthash, serial, selectedCache, selectedLabels, removedComponents)
     local src = source
     local Player = RSGCore.Functions.GetPlayer(src)
     if not Player then return end
@@ -394,7 +564,8 @@ RegisterServerEvent('rsg-weaponcomp:server:setComponents', function(objecthash, 
     if type(selectedCache) ~= 'table' then return end
     for cat, compName in pairs(selectedCache) do
         if type(cat) ~= 'string' or type(compName) ~= 'string' then return end
-        if not ValidComponents[compName] then
+        if cat == 'GRIPSTOCK_TINT' and Config.GunstockTints ~= true then return end
+        if not ValidComponentsByCategory[cat] or not ValidComponentsByCategory[cat][compName] then
             TriggerClientEvent('ox_lib:notify', src, { title = locale('sv_lang_10', 0), description = 'Invalid component detected', type = 'error' })
             return
         end
@@ -406,12 +577,27 @@ RegisterServerEvent('rsg-weaponcomp:server:setComponents', function(objecthash, 
     if weaponItem and weaponItem.info and weaponItem.info.componentshash then
         existingComps = weaponItem.info.componentshash
     end
+    removedComponents = type(removedComponents) == 'table' and removedComponents or {}
+    for cat, remove in pairs(removedComponents) do
+        if type(cat) ~= 'string' or not ValidComponentsByCategory[cat] or not IsRemovableComponent(cat) or remove ~= true then return end
+    end
+    local existingLabels = weaponItem and weaponItem.info and weaponItem.info.components or {}
+    local finalComps, finalLabels = {}, {}
+    for cat, name in pairs(existingComps) do finalComps[cat] = name end
+    for cat, name in pairs(existingLabels) do finalLabels[cat] = name end
+    for cat, name in pairs(selectedCache) do finalComps[cat] = name end
+    for cat, name in pairs(selectedLabels or {}) do finalLabels[cat] = name end
+    for cat in pairs(removedComponents) do
+        finalComps[cat] = nil
+        finalLabels[cat] = nil
+    end
     local newComps = {}
-    for cat, name in pairs(selectedCache) do
+    for cat, name in pairs(finalComps) do
         if existingComps[cat] ~= name then
             newComps[cat] = name
         end
     end
+    local scopeRemoved = removedComponents.SCOPE == true
     local price = CalculatePrice(newComps)
     
     local currentCash = Player.Functions.GetMoney(Config.PaymentType)
@@ -429,7 +615,10 @@ RegisterServerEvent('rsg-weaponcomp:server:setComponents', function(objecthash, 
     if price > 0 then
         Player.Functions.RemoveMoney(Config.PaymentType, price)
     end
-    saveWeaponComponents(serial, selectedCache, selectedLabels, Player)
+    if scopeRemoved and weaponItem and weaponItem.info then
+        weaponItem.info.equippedScope = false
+    end
+    saveWeaponComponents(serial, finalComps, finalLabels, Player)
     TriggerClientEvent('rsg-weaponcomp:client:animationSaved', src, objecthash, serial)
     
     TriggerClientEvent('ox_lib:notify', src, {
