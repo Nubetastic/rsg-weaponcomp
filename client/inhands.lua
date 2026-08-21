@@ -10,7 +10,7 @@ local function attachComponent(ped, compHash, weaponHash)
     if mdl and mdl ~= 0 then
         lib.requestModel(mdl)
     end
-
+    
     if IsEntityAPed(ped) then
         GiveWeaponComponentToEntity(ped, compHash, weaponHash, true)
         ApplyShopItemToPed(ped, compHash, true, true, true)

@@ -264,30 +264,6 @@ AddEventHandler("rsg-weaponcomp:client:animationSaved", function(objecthash, ser
     TriggerEvent('rsg-weaponcomp:client:ExitCam')
 end)
 
-local function SetRandomCameraAroundWeapon()
-    if not camera or not wepObj then return end
-
-    local wepCoords = GetEntityCoords(wepObj)
-    local radius = 0.50
-
-    local angleDeg = math.random(1, 360)
-    local pitchDeg = math.random(-10, 50)
-
-    local angleRad = math.rad(angleDeg)
-    local pitchRad = math.rad(pitchDeg)
-
-    local xOffset = radius * math.cos(angleRad) * math.cos(pitchRad)
-    local yOffset = radius * math.sin(angleRad) * math.cos(pitchRad)
-    local zOffset = radius * math.sin(pitchRad)
-
-    local camX = wepCoords.x + xOffset
-    local camY = wepCoords.y + yOffset
-    local camZ = wepCoords.z + zOffset
-
-    SetCamCoord(camera, camX, camY, camZ)
-    PointCamAtCoord(camera, wepCoords.x, wepCoords.y, wepCoords.z)
-end
-
 local function smoothZoom(cam, fromFov, toFov, duration)
     local startTime = GetGameTimer()
     while true do

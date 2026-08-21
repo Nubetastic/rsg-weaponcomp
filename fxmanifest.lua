@@ -22,7 +22,6 @@ client_scripts {
     'client/inhands.lua',
     'client/inspect.lua',
     'client/propplace.lua',
-    'client/test.lua',
 }
 
 files {
